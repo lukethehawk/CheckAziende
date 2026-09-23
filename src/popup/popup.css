@@ -116,6 +116,17 @@ h1 {
   display: none !important;
 }
 
+.unidentified-view {
+  padding-bottom: 4px;
+}
+
+.unidentified-copy {
+  margin-top: 8px;
+  color: #6f7480;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .identity {
   padding: 2px 0 14px;
 }
@@ -136,6 +147,11 @@ h1 {
 .identity-badge.unverified {
   background: #fff6e5;
   color: #966519;
+}
+
+.identity-badge.unidentified {
+  background: #eef1ff;
+  color: #4057ca;
 }
 
 h2 {
@@ -310,11 +326,6 @@ h2 {
   font-weight: 700;
 }
 
-.open-icon {
-  color: #8a8f99;
-  font-size: 15px;
-}
-
 .source-line {
   flex-wrap: wrap;
   gap: 5px;
@@ -331,14 +342,14 @@ h2 {
 }
 
 .manual-panel {
-  padding: 14px;
-  border: 1px solid #e6e8ed;
-  border-radius: 14px;
-  background: #fafbfc;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eceef2;
 }
 
 .manual-title {
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .manual-description {
@@ -350,7 +361,7 @@ h2 {
 
 .manual-row {
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 input {
