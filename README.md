@@ -136,3 +136,19 @@ Quando la P.IVA è già stata identificata:
 È presente anche un motore interno di valutazione finanziaria che considera stato, anzianità, numero di bilanci disponibili, EBITDA margin, margine netto, trend del fatturato e continuità degli utili. Il punteggio non viene ancora mostrato nell'interfaccia: servirà per una futura scala rosso-verde e per il requisito operativo di almeno due bilanci depositati.
 
 L'utile è mostrato in verde quando positivo e in rosso con segno meno quando negativo. Il badge con il numero di bilanci è stato rimosso; restano soltanto stato dell'impresa e anzianità.
+
+
+## Provider orchestrator
+
+La versione 0.6.0 introduce un orchestratore dei provider con priorità alla velocità:
+
+- VIES continua a verificare la P.IVA;
+- Aziende.it e Xray Finance vengono interrogati in parallelo con un budget breve;
+- RegistroAziende.it viene usato come fallback bloccante solo se il provider primario è incompleto;
+- quando i dati principali sono già disponibili, RegistroAziende.it viene usato in background come verifica incrociata e non ritarda il primo render;
+- i risultati completi vengono memorizzati localmente per 24 ore e possono essere riutilizzati fino a 7 giorni con aggiornamento in background (stale-while-revalidate);
+- eventuali conflitti su stato, fatturato o utile vengono registrati nella struttura di verifica per il futuro score di affidabilità dei dati.
+
+RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
+
+ReportAziende è predisposto come possibile provider futuro, ma la sua API ufficiale richiede un token Bearer. CompanyReports e UfficioCamerale non vengono interrogati automaticamente finché richiedono login/acquisti o non offrono un accesso pubblico stabile: aggiungerli al fast path aumenterebbe latenza e fragilità senza un beneficio proporzionato.
