@@ -73,3 +73,29 @@ test("validates slug variants for another known public page", () => {
 
   assert.ok(slugs.includes("rubino-srl-giffoni-valle-piana"));
 });
+
+
+test("parses flattened MPS Monitor history rows", () => {
+  const text = `
+Dati aziendali: Mps Monitor Srl, P.IVA 03122040987
+Stato Attiva
+Ragione sociale Mps Monitor Srl
+P.IVA 03122040987
+Fatturato 2025 € 5.55 M
+Utile/Perdita 2025 € 2.38 M
+Fatturato, Utile/perdita dell'azienda MPS MONITOR SRL per gli anni 2023, 2024, 2025
+Anno Fatturato Utile/Perdita
+2023 € 4.192.298 € 548.583
+2024 € 4.786.773 € 1.390.357
+2025 € 5.548.281 € 2.383.651
+`;
+
+  const company = parseRegistroAziendeText(text);
+
+  assert.deepEqual(
+    company.financials.balanceHistory.map((item) => item.year),
+    [2025, 2024, 2023]
+  );
+  assert.equal(company.financials.balanceHistory[2].revenue, 4_192_298);
+  assert.equal(company.financials.balanceHistory[2].profit, 548_583);
+});
