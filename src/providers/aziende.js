@@ -438,7 +438,10 @@ function normalizeProvinceHints(values) {
     .slice(0, 4);
 }
 
-export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
+export function buildSlugCandidates(
+  names,
+  { provinceHints = [], includeItalianBrandVariants = false } = {}
+) {
   const legalVariants = [
     "srl",
     "s-r-l",
@@ -497,28 +500,31 @@ export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
   // Italian subsidiaries of international brands frequently include a
   // territorial qualifier in the legal name even when the public site only
   // exposes the global brand (e.g. creditsafe.com -> Creditsafe Italia Srl).
-  // Try these qualified forms before the broader legal-form expansion.
-  for (const slug of uniqueBases) {
-    if (hasLegalSuffix(slug)) continue;
+  // Keep this expansion limited to domain/name inference so normal VAT
+  // enrichment does not pay the extra lookup cost.
+  if (includeItalianBrandVariants) {
+    for (const slug of uniqueBases) {
+      if (hasLegalSuffix(slug)) continue;
 
-    for (const qualifier of ["italia", "italy"]) {
-      const qualified = `${slug}-${qualifier}`;
-      result.push(qualified);
-
-      for (const province of provinces) {
-        result.push(`${qualified}-${province}`);
-      }
-
-      for (const suffix of legalVariants) {
-        const candidate = `${qualified}-${suffix}`;
-        result.push(candidate);
+      for (const qualifier of ["italia", "italy"]) {
+        const qualified = `${slug}-${qualifier}`;
+        result.push(qualified);
 
         for (const province of provinces) {
-          result.push(`${candidate}-${province}`);
+          result.push(`${qualified}-${province}`);
         }
 
-        if (result.length >= MAX_SLUGS) {
-          return unique(result).slice(0, MAX_SLUGS);
+        for (const suffix of legalVariants) {
+          const candidate = `${qualified}-${suffix}`;
+          result.push(candidate);
+
+          for (const province of provinces) {
+            result.push(`${candidate}-${province}`);
+          }
+
+          if (result.length >= MAX_SLUGS) {
+            return unique(result).slice(0, MAX_SLUGS);
+          }
         }
       }
     }
@@ -733,6 +739,9 @@ export async function findAziendeCompaniesByContext({
   if (!names?.length) return [];
 
   return fetchCandidates(
-    buildSlugCandidates(names, { provinceHints })
+    buildSlugCandidates(names, {
+      provinceHints,
+      includeItalianBrandVariants: true
+    })
   );
 }
