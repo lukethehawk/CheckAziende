@@ -124,7 +124,7 @@ function sanitizeField(value) {
     .trim() || null;
 }
 
-function inferStatus(lines) {
+export function inferCompanyStatus(text, lines = normalizeLines(text)) {
   const explicit = findLabelValue(lines, [
     "Stato attività",
     "Stato attivita",
@@ -139,8 +139,21 @@ function inferStatus(lines) {
     if (/liquidazione/i.test(explicit)) return "In liquidazione";
   }
 
-  // The company summary is at the top of Aziende.it. Do not scan the whole
-  // page: FAQ and product names can contain words such as "cessata".
+  // Aziende.it puts the status next to the legal form in the company header.
+  // Search only the beginning of the page so FAQ/product text cannot override it.
+  const headerText = clean(String(text || "").slice(0, 3500));
+  const headerMatch = headerText.match(
+    /(Attiva|Cessata|Inattiva|In liquidazione)\s+(?=(?:SOCIETA|SOGGETTO|IMPRESA|DITTA|ENTE|COOPERATIVA)\b)/i
+  );
+
+  if (headerMatch) {
+    const normalized = headerMatch[1].toLowerCase();
+    if (normalized === "attiva") return "Attiva";
+    if (normalized === "cessata") return "Cessata";
+    if (normalized === "inattiva") return "Inattiva";
+    if (normalized === "in liquidazione") return "In liquidazione";
+  }
+
   for (const line of lines.slice(0, 35)) {
     const match = line.match(/^(Attiva|Cessata|Inattiva|In liquidazione)\b/i);
     if (!match) continue;
@@ -281,6 +294,85 @@ function inferAddress(lines, text) {
   if (summary?.[1]) return sanitizeField(summary[1]);
 
   return sanitizeField(findLabelValue(lines, ["Sede"]));
+}
+
+export function parseBalanceHistoryRows(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+
+  const normalizedRows = rows
+    .map((row) => (Array.isArray(row) ? row.map(clean) : []))
+    .filter((row) => row.length);
+
+  if (!normalizedRows.length) return [];
+
+  const headerIndex = normalizedRows.findIndex((row) => {
+    const joined = row.join(" ").toLowerCase();
+    return joined.includes("anno") &&
+      joined.includes("fatturato") &&
+      /utile|perdita/.test(joined);
+  });
+
+  if (headerIndex < 0) return [];
+
+  const headers = normalizedRows[headerIndex].map((value) => value.toLowerCase());
+  const indexOf = (pattern, fallback) => {
+    const index = headers.findIndex((value) => pattern.test(value));
+    return index >= 0 ? index : fallback;
+  };
+
+  const yearIndex = indexOf(/^anno$/, 0);
+  const revenueIndex = indexOf(/fatturato/, 1);
+  const deltaIndex = indexOf(/Δ|varia|%/, 2);
+  const profitIndex = indexOf(/utile|perdita/, 3);
+  const employeesIndex = indexOf(/dipendenti/, 4);
+  const capitalIndex = indexOf(/capitale/, 5);
+
+  const history = [];
+
+  for (const row of normalizedRows.slice(headerIndex + 1)) {
+    const yearMatch = String(row[yearIndex] || "").match(/\b(20\d{2})\b/);
+    if (!yearMatch) continue;
+
+    const employeeRaw = String(row[employeesIndex] || "").trim();
+    const employeeValue = /^\d[\d.]*$/.test(employeeRaw)
+      ? parseItalianNumber(employeeRaw)
+      : null;
+
+    history.push({
+      year: Number(yearMatch[1]),
+      revenue: parseMoney(row[revenueIndex]) ?? null,
+      delta: row[deltaIndex] && !/^[-—]$/.test(row[deltaIndex])
+        ? row[deltaIndex]
+        : null,
+      profit: parseMoney(row[profitIndex]) ?? null,
+      employees: Number.isFinite(employeeValue) ? employeeValue : null,
+      capital: parseMoney(row[capitalIndex]) ?? null
+    });
+
+    if (history.length >= 3) break;
+  }
+
+  return history;
+}
+
+function extractBalanceHistoryFromDocument(doc) {
+  for (const table of doc.querySelectorAll("table")) {
+    const tableText = clean(table.textContent || "").toLowerCase();
+    if (!tableText.includes("anno") ||
+        !tableText.includes("fatturato") ||
+        !/utile|perdita/.test(tableText)) {
+      continue;
+    }
+
+    const rows = [...table.querySelectorAll("tr")].map((row) =>
+      [...row.querySelectorAll("th, td")].map((cell) => cell.textContent || "")
+    );
+
+    const parsed = parseBalanceHistoryRows(rows);
+    if (parsed.length) return parsed;
+  }
+
+  return [];
 }
 
 export function slugifyCompanyName(value) {
@@ -430,7 +522,7 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
     providerUrl: url || null,
     name: sanitizeField(name) || sanitizeField(findLabelValue(lines, ["Ragione Sociale"])) || null,
     vat,
-    status: inferStatus(lines),
+    status: inferCompanyStatus(text, lines),
     legalForm: sanitizeField(findLabelValue(lines, ["Natura Giuridica", "Forma"])),
     taxCode: sanitizeField(findLabelValue(lines, ["Codice Fiscale"])),
     rea: inferRea(text) || sanitizeField(findLabelValue(lines, ["REA"])),
@@ -465,7 +557,20 @@ export function parseAziendePage(html, url) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const h1 = clean(doc.querySelector("h1")?.textContent || "");
   const text = doc.body?.innerText || doc.body?.textContent || "";
-  return parseAziendeText(text, { name: h1 || null, url });
+  const company = parseAziendeText(text, { name: h1 || null, url });
+
+  if (!company) return null;
+
+  // DOMParser may flatten visual line breaks, so derive these fields from
+  // structural HTML when possible instead of relying only on text lines.
+  company.status = inferCompanyStatus(text, normalizeLines(text));
+
+  const domHistory = extractBalanceHistoryFromDocument(doc);
+  if (domHistory.length) {
+    company.financials.balanceHistory = domHistory;
+  }
+
+  return company;
 }
 
 async function readCache(key) {
@@ -493,7 +598,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchCompanySlug(slug) {
-  const key = `aziende:v3:slug:${slug}`;
+  const key = `aziende:v4:slug:${slug}`;
   const cached = await readCache(key);
   if (cached) return cached;
 
