@@ -76,6 +76,33 @@ export function selectCanonicalPrimary(aziende, registro) {
   return aziende || registro || null;
 }
 
+export function mergeProviderResultState(current = {}, patch = {}) {
+  const merged = {
+    ...(current || {}),
+    ...(patch || {})
+  };
+
+  for (const key of ["primary", "aziende", "xray", "registro", "verification"]) {
+    if (
+      (patch?.[key] === null || patch?.[key] === undefined) &&
+      current?.[key] !== null &&
+      current?.[key] !== undefined
+    ) {
+      merged[key] = current[key];
+    }
+  }
+
+  // Aziende.it remains canonical once it has been observed. A later async
+  // enrichment must never downgrade the visible primary back to a fallback.
+  if (merged.aziende) {
+    merged.primary = merged.aziende;
+  } else if (!merged.primary && merged.registro) {
+    merged.primary = merged.registro;
+  }
+
+  return merged;
+}
+
 export function mergeBalanceHistories(primaryHistory, fallbackHistory) {
   const byYear = new Map();
 
@@ -317,7 +344,7 @@ export function needsFallback(company, options = {}) {
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v7:${vat}`;
+  return `provider-orchestrator:v8:${vat}`;
 }
 
 async function readSnapshot(vat) {
