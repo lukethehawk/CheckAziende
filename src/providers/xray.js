@@ -133,18 +133,20 @@ function nameSlugVariants(name) {
 
   variants.add(
     raw
-      .replace(/-spa(?:$|-)/g, "-s-p-a$1")
-      .replace(/-srl(?:$|-)/g, "-s-r-l$1")
+      .replace(/-spa$/, "-s-p-a")
+      .replace(/-srl$/, "-s-r-l")
+      .replace(/-srls$/, "-s-r-l-s")
   );
 
   variants.add(
     raw
-      .replace(/-societa-per-azioni(?:$|-)/g, "-s-p-a$1")
-      .replace(/-societa-a-responsabilita-limitata(?:$|-)/g, "-s-r-l$1")
+      .replace(/-societa-per-azioni$/, "-s-p-a")
+      .replace(/-societa-a-responsabilita-limitata$/, "-s-r-l")
+      .replace(/-societa-a-responsabilita-limitata-semplificata$/, "-s-r-l-s")
   );
 
   return [...variants]
-    .map((value) => value.replace(/\$1/g, "").replace(/-{2,}/g, "-"))
+    .map((value) => value.replace(/-{2,}/g, "-"))
     .filter(Boolean);
 }
 
