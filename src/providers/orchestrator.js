@@ -2,8 +2,10 @@ import { findAziendeCompanyByVat } from "./aziende.js";
 import { findXrayCompanyByVat } from "./xray.js";
 import { findRegistroAziendeCompanyByVat } from "./registroaziende.js";
 
-const FAST_BUDGET_MS = 950;
-const FALLBACK_BUDGET_MS = 650;
+const PRIMARY_BUDGET_MS = 1600;
+const XRAY_BUDGET_MS = 900;
+const FALLBACK_BUDGET_MS = 550;
+const ENRICHMENT_BUDGET_MS = 500;
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const api = globalThis.browser ?? globalThis.chrome;
@@ -84,7 +86,7 @@ export function needsFallback(company) {
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v1:${vat}`;
+  return `provider-orchestrator:v2:${vat}`;
 }
 
 async function readSnapshot(vat) {
@@ -134,56 +136,144 @@ async function resolveNetwork({
   const aziendePromise = findAziendeCompanyByVat(vat, {
     names,
     provinceHints
-  });
+  }).catch(() => null);
 
-  const xrayPromise = findXrayCompanyByVat(vat, { names });
+  const initialXrayPromise = findXrayCompanyByVat(vat, {
+    names
+  }).catch(() => null);
 
-  const [aziende, xray] = await Promise.all([
-    timeoutValue(aziendePromise, FAST_BUDGET_MS),
-    timeoutValue(xrayPromise, FAST_BUDGET_MS)
+  const [aziendeFast, xrayFast] = await Promise.all([
+    timeoutValue(aziendePromise, PRIMARY_BUDGET_MS),
+    timeoutValue(initialXrayPromise, XRAY_BUDGET_MS)
   ]);
 
-  const registroPromise = findRegistroAziendeCompanyByVat(vat, {
-    names: [aziende?.name, ...names].filter(Boolean),
-    cityHints: [aziende?.city, ...cityHints].filter(Boolean)
-  });
+  const buildRegistroPromise = (azienda = null) =>
+    findRegistroAziendeCompanyByVat(vat, {
+      names: [azienda?.name, ...names].filter(Boolean),
+      cityHints: [azienda?.city, ...cityHints].filter(Boolean)
+    }).catch(() => null);
 
+  const registroPromise = buildRegistroPromise(aziendeFast);
   let registro = null;
 
-  if (needsFallback(aziende)) {
-    registro = await timeoutValue(
-      registroPromise,
-      FALLBACK_BUDGET_MS
+  // RegistroAziende is a verifier/fallback. It may fill gaps, but it should
+  // never replace a richer Aziende.it record when the latter is available.
+  if (needsFallback(aziendeFast)) {
+    registro = await timeoutValue(registroPromise, FALLBACK_BUDGET_MS);
+  }
+
+  let xray = xrayFast;
+
+  // Xray matching is much more reliable once the canonical company name is
+  // known. Retry cheaply with the Aziende.it name if the speculative lookup
+  // did not resolve.
+  if (!xray && aziendeFast?.name) {
+    xray = await timeoutValue(
+      findXrayCompanyByVat(vat, {
+        names: [aziendeFast.name, ...names]
+      }),
+      ENRICHMENT_BUDGET_MS
     );
   }
 
-  const primary = aziende || registro || null;
-  const verification = compareProviderData(primary, registro);
+  const primary = aziendeFast || registro || null;
+  const verification = compareProviderData(
+    aziendeFast || primary,
+    registro
+  );
+
+  const backgroundCanonical = aziendeFast
+    ? null
+    : aziendePromise.then(async (azienda) => {
+        if (!azienda) return null;
+
+        let richerXray = xray;
+        if (!richerXray) {
+          richerXray = await findXrayCompanyByVat(vat, {
+            names: [azienda.name, ...names].filter(Boolean)
+          }).catch(() => null);
+        }
+
+        let richerRegistro = registro;
+        if (!richerRegistro) {
+          richerRegistro = await buildRegistroPromise(azienda);
+        }
+
+        const update = {
+          primary: azienda,
+          aziende: azienda,
+          xray: richerXray,
+          registro: richerRegistro,
+          verification: compareProviderData(azienda, richerRegistro)
+        };
+
+        await writeSnapshot(vat, update);
+        return update;
+      });
+
+  const backgroundXray = xray
+    ? null
+    : initialXrayPromise.then(async (initial) => {
+        if (initial) {
+          await writeSnapshot(vat, {
+            primary,
+            aziende: aziendeFast,
+            xray: initial,
+            registro,
+            verification
+          });
+          return initial;
+        }
+
+        const azienda = aziendeFast || await aziendePromise;
+        if (!azienda?.name) return null;
+
+        const retry = await findXrayCompanyByVat(vat, {
+          names: [azienda.name, ...names].filter(Boolean)
+        }).catch(() => null);
+
+        if (retry) {
+          await writeSnapshot(vat, {
+            primary: azienda || primary,
+            aziende: azienda || aziendeFast,
+            xray: retry,
+            registro,
+            verification: compareProviderData(azienda || primary, registro)
+          });
+        }
+
+        return retry;
+      });
+
+  const backgroundVerification = registro
+    ? null
+    : buildRegistroPromise(aziendeFast).then(async (value) => {
+        const canonical = aziendeFast || primary;
+        const update = {
+          registro: value,
+          verification: compareProviderData(canonical, value)
+        };
+
+        await writeSnapshot(vat, {
+          primary: canonical,
+          aziende: aziendeFast,
+          xray,
+          registro: value,
+          verification: update.verification
+        });
+
+        return update;
+      });
 
   const result = {
     primary,
-    aziende,
+    aziende: aziendeFast,
     xray,
     registro,
     verification,
-    backgroundVerification: registro
-      ? null
-      : registroPromise.then(async (value) => {
-          const update = {
-            registro: value,
-            verification: compareProviderData(primary, value)
-          };
-
-          await writeSnapshot(vat, {
-            primary,
-            aziende,
-            xray,
-            registro: value,
-            verification: update.verification
-          });
-
-          return update;
-        })
+    backgroundCanonical,
+    backgroundXray,
+    backgroundVerification
   };
 
   await writeSnapshot(vat, result);
@@ -201,6 +291,8 @@ export async function resolveCompanyProviders(args) {
       ...cached.value,
       fromCache: true,
       stale: cached.stale,
+      backgroundCanonical: null,
+      backgroundXray: null,
       backgroundVerification: null,
       backgroundRefresh
     };
