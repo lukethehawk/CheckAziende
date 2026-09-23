@@ -404,6 +404,30 @@ function stripDescriptor(value) {
   );
 }
 
+export function legalNameLookupVariants(value) {
+  const source = clean(
+    stripDescriptor(value)
+      .replace(/[!]+/g, " ")
+      .replace(/\s+/g, " ")
+  );
+
+  if (!source) return [];
+
+  const variants = [source];
+
+  // Registry/VIES names can append qualifiers or even repeat the legal form,
+  // e.g. "MPS MONITOR SRL A SOCIO UNICO !!S.R.L.". Keep the original
+  // candidate, but also try the canonical name up to the first legal form.
+  // VAT validation still decides whether the fetched company is acceptable.
+  const canonical = source.match(
+    /^(.+?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|srls|srl|spa|snc|sas))(?=\s|$)/i
+  )?.[1];
+
+  if (canonical) variants.push(clean(canonical));
+
+  return unique(variants);
+}
+
 function legalFormExpandedSlugs(value) {
   const normalized = slugifyCompanyName(value);
   if (!normalized) return [];
@@ -481,7 +505,7 @@ export function buildSlugCandidates(
   const bases = [];
 
   for (const raw of unique(names)) {
-    for (const candidate of unique([clean(raw), stripDescriptor(raw)])) {
+    for (const candidate of legalNameLookupVariants(raw)) {
       for (const slug of legalFormExpandedSlugs(candidate)) {
         if (!slug || slug.length < 3 || generic.has(slug)) continue;
         bases.push(slug);
@@ -650,8 +674,16 @@ async function writeCache(key, value) {
   }
 }
 
-async function fetchCompanySlug(slug) {
-  const key = `aziende:v5:slug:${slug}`;
+export function shouldCacheAziendeMiss(status) {
+  return Number(status) === 404;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchCompanySlug(slug, { retryTransient = true } = {}) {
+  const key = `aziende:v6:slug:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
@@ -668,21 +700,35 @@ async function fetchCompanySlug(slug) {
     });
 
     if (!response.ok) {
-      await writeCache(key, null);
+      // Only a real 404 is a durable miss. Rate limits, server errors and
+      // anti-bot responses must not poison the provider cache for 12 hours.
+      if (shouldCacheAziendeMiss(response.status)) {
+        await writeCache(key, null);
+        return null;
+      }
+
+      if (
+        retryTransient &&
+        (response.status === 429 || response.status >= 500)
+      ) {
+        await wait(450);
+        return fetchCompanySlug(slug, { retryTransient: false });
+      }
+
       return null;
     }
 
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/html")) {
-      await writeCache(key, null);
       return null;
     }
 
     const html = await response.text();
     const company = parseAziendePage(html, response.url || url);
 
+    // A 200 page that cannot be parsed can be a temporary challenge or a
+    // changed response. Do not persist it as a negative lookup.
     if (!company?.vat) {
-      await writeCache(key, null);
       return null;
     }
 
@@ -696,11 +742,12 @@ async function fetchCompanySlug(slug) {
 async function firstVatMatch(slugs, vat) {
   const uniqueSlugs = unique(slugs).slice(0, MAX_SLUGS);
 
-  for (let i = 0; i < uniqueSlugs.length; i += 4) {
-    const batch = uniqueSlugs.slice(i, i + 4);
-    const values = await Promise.all(batch.map((slug) => fetchCompanySlug(slug)));
-    const match = values.find((company) => company?.vat === vat);
-    if (match) return match;
+  // VAT lookups normally have a good legal name from VIES/page evidence.
+  // Query candidates sequentially so the exact slug gets a chance to resolve
+  // before speculative variants can trigger provider throttling.
+  for (const slug of uniqueSlugs) {
+    const company = await fetchCompanySlug(slug);
+    if (company?.vat === vat) return company;
   }
 
   return null;

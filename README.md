@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.0`.
+Versione `0.8.1`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -278,3 +278,18 @@ Per evitare giudizi troppo forti con informazioni incomplete, una società resta
 Nell'accordion vengono mostrati, quando disponibili, bilanci depositati, EBITDA margin, margine netto, trend del fatturato, continuità degli utili e copertura dei dati. La UI specifica che si tratta di un indicatore interno basato sui dati disponibili e non di un rating creditizio.
 
 Le fixture realistiche di Future Tech e Rubino verificano anche che il profilo resti utilizzabile dopo il merge dei provider.
+
+
+## Aziende.it reliability 0.8.1
+
+Il lookup Aziende.it è stato reso più conservativo dopo alcuni casi in cui il provider spariva temporaneamente dalla scheda pur essendo disponibile sul sito pubblico.
+
+- i lookup per P.IVA provano ora gli slug in sequenza, dando priorità al candidato esatto, invece di aprire piccoli batch concorrenti;
+- gli errori temporanei come `429` e `5xx` non vengono più memorizzati come risultati negativi;
+- sui transienti viene eseguito un solo retry leggero;
+- la cache negativa resta solo per i veri `404`;
+- la cache provider Aziende.it è stata invalidata (`v6`);
+- i nomi VIES rumorosi o con forme societarie ripetute, ad esempio `MPS MONITOR SRL A SOCIO UNICO !!S.R.L.`, generano anche la variante canonica `mps-monitor-srl`;
+- un test protegge l'ordine del caso normale `FUTURE TECH SRL` → `future-tech-srl`.
+
+La P.IVA resta sempre il controllo finale: una pagina Aziende.it viene accettata solo se il VAT trovato coincide con quello richiesto.
