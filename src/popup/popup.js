@@ -1,6 +1,6 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
-import { getDomainProfile, uniqueBrandHints } from "../domain.js";
+import { buildDomainLookupContext, uniqueBrandHints } from "../domain.js";
 import { assessVatMatch, confidenceLabel } from "../confidence.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -49,7 +49,7 @@ const elements = {
 };
 
 let currentScan = null;
-let currentDomainProfile = null;
+let currentDomainLookup = null;
 let companyIsVisible = false;
 
 function digitsOnly(value) {
@@ -374,8 +374,13 @@ async function inspectActivePage() {
     }
 
     currentScan = mainFrame?.result || null;
-    currentDomainProfile = getDomainProfile(currentScan?.hostname || "");
-    if (currentScan) currentScan.domainProfile = currentDomainProfile;
+    currentDomainLookup = buildDomainLookupContext({
+      hostname: currentScan?.hostname || "",
+      title: currentScan?.title || "",
+      siteName: currentScan?.siteName || "",
+      brandHints: currentScan?.brandHints || []
+    });
+    if (currentScan) currentScan.domainLookup = currentDomainLookup;
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
     let candidates = currentScan?.candidates || [];
