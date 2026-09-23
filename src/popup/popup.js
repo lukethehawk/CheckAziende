@@ -845,10 +845,12 @@ async function inspectActivePage() {
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
     let candidates = currentScan?.candidates || [];
+    let relatedCandidates = [];
 
     if (!candidates.length) {
       const related = await scanFallbackPages(tab.id);
-      candidates = related?.candidates || [];
+      relatedCandidates = related?.candidates || [];
+      candidates = relatedCandidates;
     }
 
     if (candidates.length) {
@@ -868,8 +870,11 @@ async function inspectActivePage() {
     // If current-page candidates were third-party entities, still check the
     // site's own Privacy/Legal/Contact pages before falling back to domain/name.
     if (currentScan?.relatedUrls?.length) {
-      const related = await scanFallbackPages(tab.id);
-      const relatedCandidates = related?.candidates || [];
+      if (!relatedCandidates.length) {
+        const related = await scanFallbackPages(tab.id);
+        relatedCandidates = related?.candidates || [];
+      }
+
       const alreadyTried = new Set(candidates.map((item) => item.vat));
 
       for (const candidate of relatedCandidates) {
