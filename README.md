@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.4.0`.
+Versione `0.5.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -120,3 +120,19 @@ L'accesso cross-origin è limitato a `www.aziende.it` e VIES.
 - packaging e release Firefox/Chromium.
 
 Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.
+
+
+## EBITDA e valutazione finanziaria
+
+La versione 0.5.0 aggiunge un secondo provider opzionale basato sulle schede pubbliche di Xray Finance.
+
+Quando la P.IVA è già stata identificata:
+- CheckAziende cerca la società su Xray Finance;
+- accetta la scheda soltanto se la P.IVA coincide;
+- importa EBITDA ed EBITDA margin;
+- mantiene Aziende.it come fonte primaria per anagrafica, fatturato, utile e storico bilanci;
+- se Xray Finance non trova una corrispondenza valida, la scheda continua a funzionare senza EBITDA.
+
+È presente anche un motore interno di valutazione finanziaria che considera stato, anzianità, numero di bilanci disponibili, EBITDA margin, margine netto, trend del fatturato e continuità degli utili. Il punteggio non viene ancora mostrato nell'interfaccia: servirà per una futura scala rosso-verde e per il requisito operativo di almeno due bilanci depositati.
+
+L'utile è mostrato in verde quando positivo e in rosso con segno meno quando negativo. Il badge con il numero di bilanci è stato rimosso; restano soltanto stato dell'impresa e anzianità.
