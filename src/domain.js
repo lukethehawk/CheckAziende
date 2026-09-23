@@ -7,33 +7,8 @@ const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
   "co.za", "com.pl", "net.pl", "org.pl"
 ]);
 
-const LEGAL_FORM_PATTERN = new RegExp(
-  [
-    "societa\\s+per\\s+azioni",
-    "societa\\s+a\\s+responsabilita\\s+limitata",
-    "s\\.?\\s*p\\.?\\s*a\\.?",
-    "s\\.?\\s*r\\.?\\s*l\\.?",
-    "s\\.?\\s*n\\.?\\s*c\\.?",
-    "s\\.?\\s*a\\.?\\s*s\\.?",
-    "srls",
-    "incorporated",
-    "corporation",
-    "company",
-    "limited",
-    "gmbh",
-    "llc",
-    "ltd",
-    "inc",
-    "corp",
-    "plc",
-    "sarl",
-    "sa",
-    "ag",
-    "bv",
-    "nv"
-  ].join("|"),
-  "gi"
-);
+const LEGAL_FORM_PATTERN = /\b(?:societa per azioni|societa a responsabilita limitata|s p a|s r l|s n c|s a s|srls|incorporated|corporation|company|limited|gmbh|llc|ltd|inc|corp|plc|sarl|sa|ag|bv|nv)\b/g;
+
 
 export function normalizeHostname(value) {
   let hostname = String(value || "").trim().toLowerCase();
@@ -108,10 +83,10 @@ export function normalizeCompanyName(value) {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, " and ")
-    .replace(LEGAL_FORM_PATTERN, " ")
     .toLowerCase()
+    .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(LEGAL_FORM_PATTERN, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
