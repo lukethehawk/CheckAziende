@@ -1,6 +1,9 @@
 export function scanCurrentPage() {
-  const VAT_LABEL_PATTERN = /(?:partita\s*iva|p\.?\s*iva|piva|vat(?:\s*(?:number|id))?)/i;
+  const VAT_LABEL_PATTERN =
+    /(?:partita\s*iva|p\.?\s*iva|piva|p\s*\.\s*i\s*\.?|vat(?:\s*(?:number|id))?)/i;
   const VAT_NUMBER_PATTERN = /(?:\bIT[\s.:-]*)?(\d{11})\b/gi;
+  const STRONG_LEGAL_CONTEXT_PATTERN =
+    /(?:\bREA\b|privacy|cookie|copyright|(?:via|viale|piazza|corso|strada|largo)\s+.{0,80}\b\d{5}\b|(?:s\.?r\.?l\.?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|inc\.?|ltd\.?|gmbh)\b.{0,120}(?:via|viale|piazza|corso|strada|largo))/i;
 
   function digitsOnly(value) {
     return String(value || "").replace(/\D/g, "");
@@ -41,7 +44,13 @@ export function scanCurrentPage() {
     }
   }
 
-  function collectLabeledVat(text, source, candidates, score = 100) {
+  function collectLabeledVat(
+    text,
+    source,
+    candidates,
+    score = 100,
+    { requireStrongLegalContext = false } = {}
+  ) {
     if (!text || !VAT_LABEL_PATTERN.test(text)) return;
 
     VAT_NUMBER_PATTERN.lastIndex = 0;
@@ -51,11 +60,12 @@ export function scanCurrentPage() {
       const vat = digitsOnly(match[1]);
       if (!isValidItalianVat(vat)) continue;
 
-      const start = Math.max(0, match.index - 100);
-      const end = Math.min(text.length, match.index + match[0].length + 100);
-      const context = clean(text.slice(start, end));
+      const start = Math.max(0, match.index - 140);
+      const end = Math.min(text.length, match.index + match[0].length + 140);
+      const context = clean(text.slice(start, end), 320);
 
       if (!VAT_LABEL_PATTERN.test(context)) continue;
+      if (requireStrongLegalContext && !STRONG_LEGAL_CONTEXT_PATTERN.test(context)) continue;
 
       upsertCandidate(candidates, {
         vat,
@@ -153,6 +163,25 @@ export function scanCurrentPage() {
 
     if (!/(?:vat|partita.?iva|tax.?id)/i.test(key)) continue;
     collectStructuredVat(node.getAttribute("content") || "", "metadati", candidates);
+  }
+
+  if (!candidates.size) {
+    const bodyText =
+      document.body?.innerText ||
+      document.body?.textContent ||
+      document.documentElement?.innerText ||
+      document.documentElement?.textContent ||
+      "";
+
+    const footerTail = bodyText.slice(Math.max(0, bodyText.length - 6000));
+
+    collectLabeledVat(
+      footerTail,
+      "footer testuale",
+      candidates,
+      105,
+      { requireStrongLegalContext: true }
+    );
   }
 
   const contactSelector = [
