@@ -1,6 +1,6 @@
 const BASE_URL = "https://www.aziende.it";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const MAX_SLUGS = 28;
+const MAX_SLUGS = 56;
 const api = globalThis.browser ?? globalThis.chrome;
 
 function clean(value) {
@@ -275,16 +275,53 @@ function stripDescriptor(value) {
   );
 }
 
-export function buildSlugCandidates(names) {
+function legalFormExpandedSlugs(value) {
+  const normalized = slugifyCompanyName(value);
+  if (!normalized) return [];
+
+  const variants = new Set([normalized]);
+
+  const replacements = [
+    [/(?:^|-)s-p-a(?:$|-)/g, "-societa-per-azioni-"],
+    [/(?:^|-)spa(?:$|-)/g, "-societa-per-azioni-"],
+    [/(?:^|-)s-r-l(?:$|-)/g, "-societa-a-responsabilita-limitata-"],
+    [/(?:^|-)srl(?:$|-)/g, "-societa-a-responsabilita-limitata-"],
+    [/(?:^|-)s-r-l-s(?:$|-)/g, "-societa-a-responsabilita-limitata-semplificata-"],
+    [/(?:^|-)srls(?:$|-)/g, "-societa-a-responsabilita-limitata-semplificata-"]
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    const expanded = normalized
+      .replace(pattern, replacement)
+      .replace(/^-+|-+$/g, "")
+      .replace(/-{2,}/g, "-");
+
+    if (expanded && expanded !== normalized) variants.add(expanded);
+  }
+
+  return [...variants];
+}
+
+function normalizeProvinceHints(values) {
+  return unique(values)
+    .map((value) => String(value || "").trim().toUpperCase())
+    .filter((value) => /^[A-Z]{2}$/.test(value))
+    .slice(0, 4);
+}
+
+export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
   const legalVariants = [
     "srl",
     "s-r-l",
+    "societa-a-responsabilita-limitata",
     "srl-a-socio-unico",
     "srl-unipersonale",
     "spa",
     "s-p-a",
+    "societa-per-azioni",
     "srls",
     "s-r-l-s",
+    "societa-a-responsabilita-limitata-semplificata",
     "snc",
     "sas",
     "inc",
@@ -305,22 +342,41 @@ export function buildSlugCandidates(names) {
 
   for (const raw of unique(names)) {
     for (const candidate of unique([clean(raw), stripDescriptor(raw)])) {
-      const slug = slugifyCompanyName(candidate);
-      if (!slug || slug.length < 3 || generic.has(slug)) continue;
-      bases.push(slug);
+      for (const slug of legalFormExpandedSlugs(candidate)) {
+        if (!slug || slug.length < 3 || generic.has(slug)) continue;
+        bases.push(slug);
+      }
     }
   }
 
   const uniqueBases = unique(bases);
-  const result = [...uniqueBases];
+  const provinces = normalizeProvinceHints(provinceHints);
+  const result = [];
 
+  // Exact and expanded names first.
+  for (const slug of uniqueBases) {
+    result.push(slug);
+
+    // Aziende.it often disambiguates duplicate names with the province suffix.
+    for (const province of provinces) {
+      result.push(`${slug}-${province}`);
+    }
+  }
+
+  // Then generate legal-form variants for brand-only names.
   for (const suffix of legalVariants) {
     for (const slug of uniqueBases) {
       const hasLegalSuffix =
-        /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd)(?:$|-)/.test(slug);
+        /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd|societa-per-azioni|societa-a-responsabilita-limitata|societa-a-responsabilita-limitata-semplificata)(?:$|-)/.test(slug);
 
       if (hasLegalSuffix) continue;
-      result.push(`${slug}-${suffix}`);
+
+      const candidate = `${slug}-${suffix}`;
+      result.push(candidate);
+
+      for (const province of provinces) {
+        result.push(`${candidate}-${province}`);
+      }
 
       if (result.length >= MAX_SLUGS) {
         return unique(result).slice(0, MAX_SLUGS);
@@ -467,15 +523,27 @@ async function fetchCandidates(slugs) {
   return [...byVat.values()];
 }
 
-export async function findAziendeCompanyByVat(vat, { names = [] } = {}) {
+export async function findAziendeCompanyByVat(
+  vat,
+  { names = [], provinceHints = [] } = {}
+) {
   const targetVat = String(vat || "").replace(/\D/g, "");
   if (!/^\d{11}$/.test(targetVat)) return null;
 
-  const candidates = await fetchCandidates(buildSlugCandidates(names));
+  const candidates = await fetchCandidates(
+    buildSlugCandidates(names, { provinceHints })
+  );
+
   return candidates.find((company) => company.vat === targetVat) || null;
 }
 
-export async function findAziendeCompaniesByContext({ names = [] } = {}) {
+export async function findAziendeCompaniesByContext({
+  names = [],
+  provinceHints = []
+} = {}) {
   if (!names?.length) return [];
-  return fetchCandidates(buildSlugCandidates(names));
+
+  return fetchCandidates(
+    buildSlugCandidates(names, { provinceHints })
+  );
 }
