@@ -15,7 +15,11 @@ export function normalizeHostname(value) {
   if (!hostname) return "";
 
   try {
-    if (hostname.includes("://")) hostname = new URL(hostname).hostname;
+    if (hostname.includes("://")) {
+      hostname = new URL(hostname).hostname;
+    } else if (hostname.includes("/")) {
+      hostname = new URL(`https://${hostname}`).hostname;
+    }
   } catch {
     // Keep raw hostname and normalize below.
   }
@@ -111,6 +115,25 @@ export function uniqueBrandHints(values) {
   }
 
   return result.slice(0, 8);
+}
+
+export function buildDomainLookupContext(pageContext) {
+  const domain = getDomainProfile(pageContext?.hostname || "");
+  const brandHints = uniqueBrandHints([
+    ...(pageContext?.brandHints || []),
+    pageContext?.siteName,
+    pageContext?.title,
+    domain.rootLabel
+  ]);
+
+  return {
+    ...domain,
+    brandHints,
+    searchNames: brandHints
+      .map((value) => normalizeCompanyName(value))
+      .filter((value) => value.length >= 3)
+      .slice(0, 6)
+  };
 }
 
 export function compareCompanyToPage(company, pageContext) {
