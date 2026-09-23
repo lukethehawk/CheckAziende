@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "CheckAziende",
-  "version": "0.1.1",
-  "description": "Rileva la Partita IVA del sito aperto e verifica i dati aziendali disponibili.",
+  "version": "0.2.0",
+  "description": "Identifica l'azienda del sito aperto e raccoglie dati societari da fonti pubbliche.",
   "permissions": [
     "activeTab",
     "scripting",
