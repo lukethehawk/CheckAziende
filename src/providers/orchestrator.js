@@ -317,7 +317,7 @@ export function needsFallback(company, options = {}) {
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v6:${vat}`;
+  return `provider-orchestrator:v7:${vat}`;
 }
 
 async function readSnapshot(vat) {
@@ -376,6 +376,23 @@ async function writeSnapshot(vat, result) {
   } catch {
     // Snapshot cache is optional.
   }
+}
+
+export function missingProviderRefreshPlan(value) {
+  const primary =
+    value?.aziende ||
+    value?.primary ||
+    value?.registro ||
+    null;
+
+  return {
+    aziende: Boolean(primary) && !value?.aziende,
+    xray: Boolean(primary?.vat) && !value?.xray,
+    registro:
+      Boolean(primary?.vat) &&
+      !value?.registro &&
+      needsFallback(primary)
+  };
 }
 
 async function resolveNetwork({
@@ -586,13 +603,102 @@ export async function resolveCompanyProviders(args) {
       ? resolveNetwork(args).catch(() => null)
       : null;
 
+    let backgroundCanonical = null;
+    let backgroundXray = null;
+    let backgroundVerification = null;
+
+    if (!cached.stale) {
+      const plan = missingProviderRefreshPlan(cached.value);
+      const primary =
+        cached.value.aziende ||
+        cached.value.primary ||
+        cached.value.registro ||
+        null;
+      const names = [
+        primary?.name,
+        ...(args?.names || [])
+      ].filter(Boolean);
+
+      if (plan.aziende) {
+        backgroundCanonical = findAziendeCompanyByVat(vat, {
+          names,
+          provinceHints: args?.provinceHints || []
+        }).then(async (azienda) => {
+          if (!azienda) return null;
+
+          const update = {
+            primary: azienda,
+            aziende: azienda,
+            xray: cached.value.xray || null,
+            registro: cached.value.registro || null,
+            verification: compareProviderData(
+              azienda,
+              cached.value.registro || null
+            )
+          };
+
+          await writeSnapshot(vat, update);
+          return update;
+        }).catch(() => null);
+      }
+
+      if (plan.xray) {
+        backgroundXray = findXrayCompanyByVat(vat, {
+          names
+        }).then(async (xray) => {
+          if (!xray) return null;
+
+          await writeSnapshot(vat, {
+            primary,
+            aziende: cached.value.aziende || null,
+            xray,
+            registro: cached.value.registro || null,
+            verification: cached.value.verification || null
+          });
+
+          return xray;
+        }).catch(() => null);
+      }
+
+      if (plan.registro) {
+        backgroundVerification = findRegistroAziendeCompanyByVat(vat, {
+          names,
+          cityHints: [
+            primary?.city,
+            ...(args?.cityHints || [])
+          ].filter(Boolean)
+        }).then(async (registro) => {
+          if (!registro) return null;
+
+          const canonical = cached.value.aziende || primary || registro;
+          const verification = compareProviderData(
+            canonical,
+            registro
+          );
+
+          await writeSnapshot(vat, {
+            primary: canonical,
+            aziende: cached.value.aziende || null,
+            xray: cached.value.xray || null,
+            registro,
+            verification
+          });
+
+          return {
+            registro,
+            verification
+          };
+        }).catch(() => null);
+      }
+    }
+
     return {
       ...cached.value,
       fromCache: true,
       stale: cached.stale,
-      backgroundCanonical: null,
-      backgroundXray: null,
-      backgroundVerification: null,
+      backgroundCanonical,
+      backgroundXray,
+      backgroundVerification,
       backgroundRefresh
     };
   }
