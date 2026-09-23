@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.6`.
+Versione `0.7.7`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -200,3 +200,8 @@ Le pagine Privacy/Legal possono ora fornire anche la ragione sociale del titolar
 ## Cache fix 0.7.6
 
 Dopo il fix Xray 0.7.4 viene invalidato anche lo snapshot generale dell'orchestratore. Questo evita che una società già memorizzata senza Xray continui a riutilizzare per 24 ore un risultato incompleto senza eseguire la nuova ricerca Xray.
+
+
+## Xray search-first 0.7.7
+
+Il lookup Xray prova ora prima la ricerca pubblica per P.IVA quando la homepage espone un form utilizzabile, e usa l'enumerazione degli slug numerici solo come fallback. Le richieste speculative sono state ridotte a piccoli batch per evitare throttling prima di raggiungere profili disambiguati come `rubino-s-r-l-15`. Il retry con la ragione sociale canonica viene inoltre mantenuto in background e riutilizzato dal popup. Sono state invalidate sia la cache Xray sia la cache dell'orchestratore.
