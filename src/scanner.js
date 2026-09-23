@@ -450,6 +450,55 @@ export async function scanRelatedPages(urls) {
     return [...new Set(values.filter(Boolean))];
   }
 
+  function extractLegalEntityName(value) {
+    const source = String(value || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+
+    const match = source.match(
+      /^(.+?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa))(?=\s|[-,;|]|$)/i
+    );
+
+    return match?.[1] ? clean(match[1], 120) : "";
+  }
+
+  function extractOwnerHints(doc, text) {
+    const hints = [];
+
+    const headings = [
+      ...doc.querySelectorAll("h1, h2, h3, h4, h5, h6, strong, b")
+    ];
+
+    for (const heading of headings) {
+      const label = clean(heading.textContent || "", 180);
+      if (!/(?:titolare\s+del\s+trattamento(?:\s+dei\s+dati)?|data\s+controller)/i.test(label)) {
+        continue;
+      }
+
+      let sibling = heading.nextElementSibling;
+      for (let i = 0; sibling && i < 3; i += 1, sibling = sibling.nextElementSibling) {
+        const legalName = extractLegalEntityName(sibling.textContent || "");
+        if (legalName) {
+          hints.push(legalName);
+          break;
+        }
+      }
+
+      if (hints.length) break;
+    }
+
+    if (!hints.length) {
+      const flattened = String(text || "").replace(/\s+/g, " ").trim();
+      const ownerMatch = flattened.match(
+        /(?:Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?|Data\s+Controller)\s*:?[\s-]+(.{2,180}?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa))(?=\s|[-,;|]|$)/i
+      );
+
+      const legalName = extractLegalEntityName(ownerMatch?.[1] || "");
+      if (legalName) hints.push(legalName);
+    }
+
+    return unique(hints).slice(0, 4);
+  }
+
   function sourceLabel(url, title) {
     let path = "";
     try {
@@ -509,27 +558,10 @@ export async function scanRelatedPages(urls) {
       checkedUrls.push(response.url || url.href);
 
       // Privacy/legal pages often identify the site owner by legal name but do
-      // not repeat its VAT number. Keep that legal name as a site-owner hint
-      // for the later domain/provider lookup.
+      // not repeat its VAT number. Prefer the document structure because
+      // DOMParser can flatten line breaks and make text-only patterns brittle.
       if (label === "privacy policy" || label === "note legali") {
-        const ownerPatterns = [
-          /Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?\s*\n+\s*([^\n]{2,180})/i,
-          /(?:Titolare|Data\s+Controller)\s*:?\s*\n+\s*([^\n]{2,180})/i
-        ];
-
-        for (const pattern of ownerPatterns) {
-          const ownerLine = text.match(pattern)?.[1];
-          if (!ownerLine) continue;
-
-          const legalName = clean(ownerLine, 180).match(
-            /^(.+?\b(?:s\.?r\.?l\.?s?\.?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|societa\s+cooperativa|cooperativa))\b/i
-          )?.[1];
-
-          if (legalName) {
-            ownerHints.push(clean(legalName, 120));
-            break;
-          }
-        }
+        ownerHints.push(...extractOwnerHints(doc, text));
       }
 
       const pageCandidates = [];

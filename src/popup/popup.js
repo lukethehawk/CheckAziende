@@ -523,6 +523,7 @@ function showUnidentified(message) {
   const copy = elements.unidentifiedView.querySelector(".unidentified-copy");
   if (message) copy.textContent = message;
   renderContacts(currentScan);
+  elements.input.value = "";
   stopLoading();
   showManual({ allowCancel: false });
 }
@@ -663,7 +664,9 @@ async function lookupVat(
     return false;
   }
 
-  elements.input.value = vat;
+  if (source === "manual") {
+    elements.input.value = vat;
+  }
   elements.button.disabled = true;
   setLoading("Recupero dati aziendali…");
 
