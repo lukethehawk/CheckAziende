@@ -124,6 +124,69 @@ export function scanCurrentPage() {
     }
   }
 
+  function discoverRelatedUrls() {
+    const keywords = [
+      "privacy",
+      "privacy-policy",
+      "legal",
+      "legal-notices",
+      "note-legali",
+      "contatti",
+      "contact",
+      "contacts",
+      "chi-siamo",
+      "about",
+      "azienda",
+      "company",
+      "corporate",
+      "terms",
+      "termini",
+      "impressum"
+    ];
+
+    const scored = [];
+
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("javascript:")) continue;
+
+      let url;
+      try {
+        url = new URL(href, location.href);
+      } catch {
+        continue;
+      }
+
+      if (url.origin !== location.origin) continue;
+      if (!["http:", "https:"].includes(url.protocol)) continue;
+
+      url.hash = "";
+      const haystack = `${url.pathname} ${anchor.textContent || ""}`.toLowerCase();
+
+      let score = 0;
+      for (const keyword of keywords) {
+        if (haystack.includes(keyword)) score += 10;
+      }
+
+      if (/privacy|legal|note-legali|impressum/.test(haystack)) score += 25;
+      if (/contatti|contact/.test(haystack)) score += 20;
+      if (/chi-siamo|about|azienda|company|corporate/.test(haystack)) score += 10;
+
+      if (score > 0) scored.push({ url: url.href, score });
+    }
+
+    const seen = new Set();
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .filter((item) => {
+        if (seen.has(item.url)) return false;
+        seen.add(item.url);
+        return true;
+      })
+      .slice(0, 6)
+      .map((item) => item.url);
+  }
+
   const legalSelector = [
     "footer",
     "address",
@@ -243,6 +306,7 @@ export function scanCurrentPage() {
     hostname: location.hostname,
     title: document.title,
     siteName,
+    relatedUrls: discoverRelatedUrls(),
     contacts: {
       emails,
       phones
@@ -254,5 +318,154 @@ export function scanCurrentPage() {
       legalNodes: legalNodes.length,
       contactNodes: contactNodes.length
     }
+  };
+}
+
+export async function scanRelatedPages(urls) {
+  const VAT_LABEL_PATTERN =
+    /(?:partita\s*iva|p\.?\s*iva|piva|p\s*\.\s*i\s*\.?|vat(?:\s*(?:number|id))?)/i;
+  const VAT_NUMBER_PATTERN = /(?:\bIT[\s.:-]*)?(\d{11})\b/gi;
+
+  function digitsOnly(value) {
+    return String(value || "").replace(/\D/g, "");
+  }
+
+  function isValidItalianVat(value) {
+    const vat = digitsOnly(value);
+    if (!/^\d{11}$/.test(vat)) return false;
+
+    let sum = 0;
+    for (let i = 0; i < 10; i += 1) {
+      let digit = Number(vat[i]);
+      if (i % 2 === 1) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+    }
+
+    return ((10 - (sum % 10)) % 10) === Number(vat[10]);
+  }
+
+  function clean(value, max = 340) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, max);
+  }
+
+  function unique(values) {
+    return [...new Set(values.filter(Boolean))];
+  }
+
+  function sourceLabel(url, title) {
+    let path = "";
+    try {
+      path = new URL(url).pathname.toLowerCase();
+    } catch {
+      return title || "pagina societaria";
+    }
+
+    if (path.includes("privacy")) return "privacy policy";
+    if (path.includes("legal") || path.includes("note-legali") || path.includes("impressum")) {
+      return "note legali";
+    }
+    if (path.includes("contact") || path.includes("contatti")) return "pagina contatti";
+    if (path.includes("about") || path.includes("chi-siamo") || path.includes("company") || path.includes("azienda")) {
+      return "pagina azienda";
+    }
+    if (path.includes("terms") || path.includes("termini")) return "termini del sito";
+    return title || "pagina societaria";
+  }
+
+  const origin = location.origin;
+  const candidates = [];
+  const emails = [];
+  const phones = [];
+  const checkedUrls = [];
+
+  for (const rawUrl of Array.isArray(urls) ? urls.slice(0, 6) : []) {
+    let url;
+    try {
+      url = new URL(rawUrl, location.href);
+    } catch {
+      continue;
+    }
+
+    if (url.origin !== origin) continue;
+
+    try {
+      const response = await fetch(url.href, {
+        credentials: "same-origin",
+        redirect: "follow"
+      });
+
+      if (!response.ok) continue;
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("text/html")) continue;
+
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const text = doc.body?.innerText || doc.body?.textContent || "";
+      const label = sourceLabel(response.url || url.href, doc.title?.trim());
+      checkedUrls.push(response.url || url.href);
+
+      VAT_NUMBER_PATTERN.lastIndex = 0;
+      let match;
+      while ((match = VAT_NUMBER_PATTERN.exec(text)) !== null) {
+        const vat = digitsOnly(match[1]);
+        if (!isValidItalianVat(vat)) continue;
+
+        const start = Math.max(0, match.index - 160);
+        const end = Math.min(text.length, match.index + match[0].length + 160);
+        const context = clean(text.slice(start, end));
+
+        if (!VAT_LABEL_PATTERN.test(context)) continue;
+
+        candidates.push({
+          vat,
+          score: 130,
+          source: label,
+          confidence: "high",
+          context,
+          url: response.url || url.href
+        });
+      }
+
+      for (const anchor of doc.querySelectorAll('a[href^="mailto:" i]')) {
+        const href = anchor.getAttribute("href") || "";
+        const raw = href.replace(/^mailto:/i, "").split("?")[0].trim();
+        try {
+          emails.push(decodeURIComponent(raw));
+        } catch {
+          emails.push(raw);
+        }
+      }
+
+      for (const anchor of doc.querySelectorAll('a[href^="tel:" i]')) {
+        const href = anchor.getAttribute("href") || "";
+        phones.push(href.replace(/^tel:/i, "").trim().replace(/\s+/g, " "));
+      }
+    } catch {
+      // Ignore individual related-page failures.
+    }
+  }
+
+  const byVat = new Map();
+  for (const candidate of candidates) {
+    const previous = byVat.get(candidate.vat);
+    if (!previous || candidate.score > previous.score) {
+      byVat.set(candidate.vat, candidate);
+    }
+  }
+
+  return {
+    candidates: [...byVat.values()].sort((a, b) => b.score - a.score),
+    contacts: {
+      emails: unique(emails).filter((email) => email.length <= 120).slice(0, 6),
+      phones: unique(phones).filter((phone) => phone.length >= 6 && phone.length <= 40).slice(0, 6)
+    },
+    checkedUrls
   };
 }
