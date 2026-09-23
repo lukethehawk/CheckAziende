@@ -260,7 +260,7 @@ export function scanCurrentPage() {
   // or structured metadata, and never infer the site owner from page content.
   if (looksLikeSearchOrDirectoryPage) {
     for (const [vat, candidate] of [...candidates.entries()]) {
-      if (!["vat_structured", "vat_metadata", "vat_legal"].includes(candidate.evidenceType)) {
+      if (!["vat_legal"].includes(candidate.evidenceType)) {
         candidates.delete(vat);
       }
     }
@@ -279,7 +279,7 @@ export function scanCurrentPage() {
     collectStructuredVat(node.getAttribute("content") || "", "metadati", candidates);
   }
 
-  if (!candidates.size) {
+  if (!candidates.size && !looksLikeSearchOrDirectoryPage) {
     const bodyText =
       document.body?.innerText ||
       document.body?.textContent ||
