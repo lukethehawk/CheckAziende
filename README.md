@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.3.0`.
+Versione `0.4.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -97,13 +97,26 @@ tests/
   domain-confidence.test.mjs
 ```
 
+## Provider societario
+
+La versione 0.4.0 aggiunge un primo provider per Aziende.it.
+
+Il provider:
+- cerca una scheda tramite ragione sociale/brand e varianti delle forme giuridiche;
+- quando la P.IVA è già nota, accetta la scheda solo se la P.IVA coincide;
+- quando la P.IVA non è presente sul sito, passa la società candidata al confidence engine;
+- normalizza fatturato, utile/perdita, dipendenti, margine netto, fatturato per dipendente, ATECO, forma giuridica, REA, PEC, SDI e data di iscrizione;
+- usa una cache locale di 12 ore;
+- è isolato in `src/providers/aziende.js`, quindi può essere sostituito o affiancato da altre fonti.
+
+L'accesso cross-origin è limitato a `www.aziende.it` e VIES.
+
 ## Prossimi passi
 
-- provider societario per ricerca per P.IVA, dominio e ragione sociale;
-- fatturato, utile/perdita, dipendenti, ATECO e dati anagrafici;
-- stato **Possibile corrispondenza** alimentato dal provider quando il sito non pubblica la P.IVA;
 - feedback **È questa / Non è questa** con backend e protezione da abuso;
-- fallback tra più fonti pubbliche;
+- secondo provider/fallback per aumentare copertura e resilienza;
+- storico degli ultimi bilanci;
+- ricerca manuale anche per ragione sociale;
 - packaging e release Firefox/Chromium.
 
 Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.

@@ -1,7 +1,15 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
+import {
+  findAziendeCompanyByVat,
+  findAziendeCompaniesByContext
+} from "../providers/aziende.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
 import { buildDomainLookupContext, uniqueBrandHints } from "../domain.js";
-import { assessVatMatch, confidenceLabel } from "../confidence.js";
+import {
+  assessDomainCompanyMatch,
+  assessVatMatch,
+  confidenceLabel
+} from "../confidence.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -17,6 +25,17 @@ const elements = {
   vat: document.querySelector("#company-vat"),
   address: document.querySelector("#company-address"),
   addressRow: document.querySelector("#address-row"),
+  legalFormRow: document.querySelector("#legal-form-row"),
+  legalForm: document.querySelector("#company-legal-form"),
+  reaRow: document.querySelector("#rea-row"),
+  rea: document.querySelector("#company-rea"),
+  pecRow: document.querySelector("#pec-row"),
+  pec: document.querySelector("#company-pec"),
+  sdiRow: document.querySelector("#sdi-row"),
+  sdi: document.querySelector("#company-sdi"),
+  registrationRow: document.querySelector("#registration-row"),
+  registration: document.querySelector("#company-registration"),
+  providerSource: document.querySelector("#provider-source"),
   contactsSection: document.querySelector("#contacts-section"),
   emailCard: document.querySelector("#email-card"),
   email: document.querySelector("#company-email"),
@@ -41,6 +60,8 @@ const elements = {
   profitCard: document.querySelector("#profit-card"),
   profitValue: document.querySelector("#profit-value"),
   profitLabel: document.querySelector("#profit-label"),
+  revenuePerEmployeeCard: document.querySelector("#revenue-per-employee-card"),
+  revenuePerEmployeeValue: document.querySelector("#revenue-per-employee-value"),
   marginCard: document.querySelector("#margin-card"),
   marginValue: document.querySelector("#margin-value"),
   atecoSection: document.querySelector("#ateco-section"),
@@ -75,6 +96,18 @@ function isValidItalianVat(value) {
 
 function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
+}
+
+function getPageContext() {
+  return {
+    hostname: currentScan?.hostname || "",
+    title: currentScan?.title || "",
+    brandHints: uniqueBrandHints([
+      ...(currentScan?.brandHints || []),
+      currentScan?.siteName,
+      ...(currentDomainLookup?.brandHints || [])
+    ])
+  };
 }
 
 function mergeRelatedContacts(related) {
@@ -113,9 +146,91 @@ function hideManual() {
   elements.manualPanel.classList.add("hidden");
 }
 
-function fallbackCompanyName(viesData) {
-  if (viesData?.name) return viesData.name;
-  return viesData?.vatNumber ? `P.IVA ${viesData.vatNumber}` : "Azienda";
+function formatCompactNumber(value, maxFractionDigits = 2) {
+  return Number(value).toLocaleString("it-IT", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFractionDigits
+  });
+}
+
+function formatCompactCurrency(value) {
+  if (!Number.isFinite(value)) return "—";
+
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+
+  if (absolute >= 1_000_000_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000_000, 0)}M`;
+  }
+
+  if (absolute >= 100_000_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000_000, 0)}M`;
+  }
+
+  if (absolute >= 10_000_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000_000, 1)}M`;
+  }
+
+  if (absolute >= 1_000_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000_000, 2)}M`;
+  }
+
+  if (absolute >= 100_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000, 0)}K`;
+  }
+
+  if (absolute >= 1_000) {
+    return `${sign}€${formatCompactNumber(absolute / 1_000, 1)}K`;
+  }
+
+  return `${sign}€${formatCompactNumber(absolute, 0)}`;
+}
+
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "—";
+  return `${formatCompactNumber(value, 1)}%`;
+}
+
+function setDetail(row, target, value) {
+  const visible = Boolean(value);
+  row.classList.toggle("hidden", !visible);
+  target.textContent = visible ? value : "—";
+}
+
+function normalizeCompany(providerData, viesData, fallbackVat) {
+  const vat = providerData?.vat || viesData?.vatNumber || digitsOnly(fallbackVat);
+
+  return {
+    provider: providerData?.provider || null,
+    providerUrl: providerData?.providerUrl || null,
+    name: providerData?.name || viesData?.name || null,
+    vat,
+    status: providerData?.status || null,
+    address: providerData?.address || viesData?.address || null,
+    legalForm: providerData?.legalForm || null,
+    taxCode: providerData?.taxCode || null,
+    rea: providerData?.rea || null,
+    pec: providerData?.pec || null,
+    sdi: providerData?.sdi || null,
+    registrationDate: providerData?.registrationDate || null,
+    chamber: providerData?.chamber || null,
+    city: providerData?.city || null,
+    province: providerData?.province || null,
+    region: providerData?.region || null,
+    ateco: providerData?.ateco || null,
+    financials: providerData?.financials || null
+  };
+}
+
+function fallbackCompanyName(company, source) {
+  if (company?.name) return company.name;
+
+  if (source !== "manual") {
+    const siteName = String(currentScan?.siteName || "").trim();
+    if (siteName && !/^https?:\/\//i.test(siteName)) return siteName;
+  }
+
+  return company?.vat ? `P.IVA ${company.vat}` : "Azienda";
 }
 
 function renderContacts(scan) {
@@ -139,35 +254,59 @@ function renderContacts(scan) {
 }
 
 function renderFinancials(financials) {
-  const hasRevenue = financials?.revenue?.value;
-  const hasEmployees = financials?.employees;
-  const hasProfit = financials?.profit?.value;
-  const hasMargin = financials?.netMargin;
-  const hasAny = hasRevenue || hasEmployees || hasProfit || hasMargin;
+  const revenue = financials?.revenue;
+  const employees = financials?.employees;
+  const profit = financials?.profit;
+  const margin = financials?.netMargin;
+  const revenuePerEmployee = financials?.revenuePerEmployee;
+
+  const hasRevenue = Number.isFinite(revenue?.value);
+  const hasEmployees = Boolean(employees?.display || Number.isFinite(employees?.value));
+  const hasProfit = Number.isFinite(profit?.value);
+  const hasMargin = Number.isFinite(margin);
+  const hasRevenuePerEmployee = Number.isFinite(revenuePerEmployee);
+  const hasAny =
+    hasRevenue ||
+    hasEmployees ||
+    hasProfit ||
+    hasMargin ||
+    hasRevenuePerEmployee;
 
   elements.financialSection.classList.toggle("hidden", !hasAny);
   if (!hasAny) return;
 
   if (hasRevenue) {
-    elements.revenueValue.textContent = financials.revenue.value;
-    elements.revenueLabel.textContent = financials.revenue.year
-      ? `Fatturato ${financials.revenue.year}`
+    elements.revenueValue.textContent = formatCompactCurrency(revenue.value);
+    elements.revenueLabel.textContent = revenue.year
+      ? `Fatturato ${revenue.year}`
       : "Fatturato";
   }
 
   elements.employeesCard.classList.toggle("hidden", !hasEmployees);
-  if (hasEmployees) elements.employeesValue.textContent = financials.employees;
+  if (hasEmployees) {
+    elements.employeesValue.textContent =
+      employees.display || String(employees.value);
+  }
 
   elements.profitCard.classList.toggle("hidden", !hasProfit);
   if (hasProfit) {
-    elements.profitValue.textContent = financials.profit.value;
-    elements.profitLabel.textContent = financials.profit.year
-      ? `utile ${financials.profit.year}`
+    elements.profitValue.textContent = formatCompactCurrency(profit.value);
+    elements.profitLabel.textContent = profit.year
+      ? `utile ${profit.year}`
       : "utile";
   }
 
+  elements.revenuePerEmployeeCard.classList.toggle(
+    "hidden",
+    !hasRevenuePerEmployee
+  );
+  if (hasRevenuePerEmployee) {
+    elements.revenuePerEmployeeValue.textContent =
+      formatCompactCurrency(revenuePerEmployee);
+  }
+
   elements.marginCard.classList.toggle("hidden", !hasMargin);
-  if (hasMargin) elements.marginValue.textContent = financials.netMargin;
+  if (hasMargin) elements.marginValue.textContent = formatPercent(margin);
 }
 
 function renderAteco(ateco) {
@@ -177,6 +316,17 @@ function renderAteco(ateco) {
 
   elements.atecoCode.textContent = ateco.code || "";
   elements.atecoDescription.textContent = ateco.description || "";
+}
+
+function renderProviderSource(company) {
+  if (!company?.provider) {
+    elements.providerSource.classList.add("hidden");
+    elements.providerSource.textContent = "";
+    return;
+  }
+
+  elements.providerSource.textContent = `Fonte dati: ${company.provider}`;
+  elements.providerSource.classList.remove("hidden");
 }
 
 function showUnidentified(message) {
@@ -191,12 +341,12 @@ function showUnidentified(message) {
 }
 
 function renderCompany(
-  viesData,
+  company,
   { source = "automatic", evidenceLabel = "", assessment = null } = {}
 ) {
-  const vat = viesData?.vatNumber || digitsOnly(elements.input.value);
-  const name = fallbackCompanyName(viesData);
-  const address = viesData?.address || "";
+  const vat = company?.vat || digitsOnly(elements.input.value);
+  const name = fallbackCompanyName(company, source);
+  const address = company?.address || "";
 
   elements.unidentifiedView.classList.add("hidden");
   elements.name.textContent = name;
@@ -204,41 +354,89 @@ function renderCompany(
   elements.address.textContent = address || "Non disponibile";
   elements.addressRow.classList.toggle("hidden", !address);
 
-  const status = assessment?.status || (source === "manual" ? "manual" : "identified");
+  setDetail(elements.legalFormRow, elements.legalForm, company?.legalForm);
+  setDetail(elements.reaRow, elements.rea, company?.rea);
+  setDetail(elements.pecRow, elements.pec, company?.pec);
+  setDetail(elements.sdiRow, elements.sdi, company?.sdi);
+  setDetail(
+    elements.registrationRow,
+    elements.registration,
+    company?.registrationDate
+  );
+
+  const status =
+    assessment?.status || (source === "manual" ? "manual" : "identified");
+
   elements.identityBadge.textContent = confidenceLabel(status);
   elements.identityBadge.classList.toggle("unverified", status === "manual");
   elements.identityBadge.classList.toggle("possible", status === "possible");
 
-  const showConfidence = source === "automatic" && Number.isFinite(assessment?.score);
+  const showConfidence =
+    source !== "manual" && Number.isFinite(assessment?.score);
+
   elements.confidenceStatus.textContent = showConfidence
     ? `Confidenza ${assessment.score}%`
     : "";
+
   elements.confidenceStatus.classList.toggle("hidden", !showConfidence);
   elements.confidenceSeparator.classList.toggle("hidden", !showConfidence);
 
-  const cityHint = address
-    ? address.split(/\s{2,}|\n/).filter(Boolean).pop()
+  const locationParts = unique([
+    company?.city,
+    company?.province,
+    company?.region
+  ]);
+
+  elements.location.textContent = locationParts.length
+    ? locationParts.join(" · ")
     : "";
-  elements.location.textContent = cityHint;
 
-  elements.sourceStatus.textContent = source === "automatic"
-    ? evidenceLabel
-      ? `P.IVA identificata da ${evidenceLabel}`
-      : "P.IVA identificata dal sito"
-    : "P.IVA inserita manualmente";
+  if (!elements.location.textContent && address) {
+    elements.location.textContent = address;
+  }
 
+  elements.sourceStatus.textContent =
+    source === "manual"
+      ? "P.IVA inserita manualmente"
+      : evidenceLabel || "Azienda identificata dal sito";
+
+  renderFinancials(company?.financials);
+  renderAteco(company?.ateco);
+  renderProviderSource(company);
   renderContacts(currentScan);
-  renderFinancials(null);
-  renderAteco(null);
 
   elements.companyView.classList.remove("hidden");
   companyIsVisible = true;
   stopLoading();
 }
 
+async function getViesData(vat, bypassCache) {
+  try {
+    return await checkItalianVatOnVies(vat, { bypassCache });
+  } catch {
+    return null;
+  }
+}
+
+function providerNames(viesData) {
+  return unique([
+    viesData?.name,
+    ...(currentDomainLookup?.brandHints || []),
+    ...(currentDomainLookup?.searchNames || []),
+    currentDomainLookup?.rootLabel,
+    currentScan?.siteName,
+    currentScan?.title
+  ]);
+}
+
 async function lookupVat(
   rawVat,
-  { source = "manual", bypassCache = false, evidenceLabel = "", candidate = null } = {}
+  {
+    source = "manual",
+    bypassCache = false,
+    evidenceLabel = "",
+    candidate = null
+  } = {}
 ) {
   const vat = digitsOnly(rawVat);
 
@@ -255,57 +453,38 @@ async function lookupVat(
   elements.button.disabled = true;
   setLoading("Recupero dati aziendali…");
 
-  try {
-    const viesData = await checkItalianVatOnVies(vat, { bypassCache });
-    const pageContext = {
-      hostname: currentScan?.hostname || "",
-      title: currentScan?.title || "",
-      brandHints: uniqueBrandHints([
-        ...(currentScan?.brandHints || []),
-        currentScan?.siteName
-      ])
-    };
-    const assessment = assessVatMatch({
-      candidate,
-      company: {
-        name: viesData?.name || "",
-        vat: viesData?.vatNumber || vat
-      },
-      pageContext,
-      manual: source === "manual"
-    });
+  const viesData = await getViesData(vat, bypassCache);
 
-    renderCompany(viesData, { source, evidenceLabel, assessment });
-    hideManual();
-  } catch {
-    const fallbackData = {
-      vatNumber: vat,
-      valid: false,
-      name: null,
-      address: null
-    };
-    const assessment = assessVatMatch({
-      candidate,
-      company: fallbackData,
-      pageContext: {
-        hostname: currentScan?.hostname || "",
-        title: currentScan?.title || "",
-        brandHints: uniqueBrandHints([
-          ...(currentScan?.brandHints || []),
-          currentScan?.siteName
-        ])
-      },
-      manual: source === "manual"
-    });
+  setLoading("Recupero fatturato e dati societari…");
 
-    renderCompany(
-      fallbackData,
-      { source, evidenceLabel, assessment }
-    );
-    hideManual();
-  } finally {
-    elements.button.disabled = false;
-  }
+  const providerData = await findAziendeCompanyByVat(vat, {
+    names: providerNames(viesData)
+  });
+
+  const company = normalizeCompany(providerData, viesData, vat);
+
+  const assessment = assessVatMatch({
+    candidate,
+    company: {
+      name: company.name || "",
+      vat: company.vat || vat
+    },
+    pageContext: getPageContext(),
+    manual: source === "manual"
+  });
+
+  renderCompany(company, {
+    source,
+    evidenceLabel:
+      evidenceLabel ||
+      (source === "manual"
+        ? "P.IVA inserita manualmente"
+        : "P.IVA identificata dal sito"),
+    assessment
+  });
+
+  hideManual();
+  elements.button.disabled = false;
 }
 
 async function scanFallbackPages(tabId) {
@@ -321,7 +500,9 @@ async function scanFallbackPages(tabId) {
       args: [relatedUrls]
     });
 
-    const mainFrame = injection?.find((item) => item.frameId === 0) || injection?.[0];
+    const mainFrame =
+      injection?.find((item) => item.frameId === 0) || injection?.[0];
+
     if (mainFrame?.error) return null;
 
     const related = mainFrame?.result || null;
@@ -332,19 +513,68 @@ async function scanFallbackPages(tabId) {
   }
 }
 
+function providerCandidateNames() {
+  return unique([
+    ...(currentDomainLookup?.brandHints || []),
+    ...(currentDomainLookup?.searchNames || []),
+    currentDomainLookup?.rootLabel,
+    currentScan?.siteName,
+    currentScan?.title
+  ]);
+}
+
+async function lookupCompanyFromDomain() {
+  const names = providerCandidateNames();
+  if (!names.length) return false;
+
+  setLoading("Cerco una possibile corrispondenza…");
+
+  const candidates = await findAziendeCompaniesByContext({ names });
+  if (!candidates.length) return false;
+
+  const pageContext = getPageContext();
+
+  const assessed = candidates
+    .map((company) => ({
+      company,
+      assessment: assessDomainCompanyMatch({
+        company,
+        pageContext,
+        confirmedMapping: false
+      })
+    }))
+    .filter((item) => item.assessment.status !== "unidentified")
+    .sort((a, b) => b.assessment.score - a.assessment.score);
+
+  const best = assessed[0];
+  if (!best) return false;
+
+  const company = normalizeCompany(best.company, null, best.company.vat);
+
+  renderCompany(company, {
+    source: "domain",
+    evidenceLabel: currentDomainLookup?.registrableDomain
+      ? `Corrispondenza da ${currentDomainLookup.registrableDomain}`
+      : "Corrispondenza da dominio e nome",
+    assessment: best.assessment
+  });
+
+  hideManual();
+  return true;
+}
+
 async function inspectActivePage() {
   let tabs;
+
   try {
     tabs = await api.tabs.query({ active: true, currentWindow: true });
   } catch {
-    stopLoading();
     showUnidentified("Non riesco a leggere la scheda attiva.");
     return;
   }
 
   const tab = tabs?.[0];
   if (!tab?.id) {
-    stopLoading();
     showUnidentified("Nessuna scheda attiva disponibile.");
     return;
   }
@@ -353,8 +583,11 @@ async function inspectActivePage() {
     if (tab.url) {
       const url = new URL(tab.url);
       elements.host.textContent = url.hostname || tab.url;
+
       if (!["http:", "https:"].includes(url.protocol)) {
-        showUnidentified("Questa pagina non può essere identificata automaticamente.");
+        showUnidentified(
+          "Questa pagina non può essere identificata automaticamente."
+        );
         return;
       }
     }
@@ -368,18 +601,22 @@ async function inspectActivePage() {
       func: scanCurrentPage
     });
 
-    const mainFrame = injection?.find((item) => item.frameId === 0) || injection?.[0];
+    const mainFrame =
+      injection?.find((item) => item.frameId === 0) || injection?.[0];
+
     if (mainFrame?.error) {
       throw new Error(mainFrame.error?.message || String(mainFrame.error));
     }
 
     currentScan = mainFrame?.result || null;
+
     currentDomainLookup = buildDomainLookupContext({
       hostname: currentScan?.hostname || "",
       title: currentScan?.title || "",
       siteName: currentScan?.siteName || "",
       brandHints: currentScan?.brandHints || []
     });
+
     if (currentScan) currentScan.domainLookup = currentDomainLookup;
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
@@ -390,19 +627,26 @@ async function inspectActivePage() {
       candidates = related?.candidates || [];
     }
 
-    if (!candidates.length) {
-      showUnidentified(
-        "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
-      );
+    if (candidates.length) {
+      const best = candidates[0];
+
+      await lookupVat(best.vat, {
+        source: "automatic",
+        evidenceLabel: best.source
+          ? `P.IVA identificata da ${best.source}`
+          : "P.IVA identificata dal sito",
+        candidate: best
+      });
+
       return;
     }
 
-    const best = candidates[0];
-    await lookupVat(best.vat, {
-      source: "automatic",
-      evidenceLabel: best.source || "pagina societaria",
-      candidate: best
-    });
+    const domainMatchFound = await lookupCompanyFromDomain();
+    if (domainMatchFound) return;
+
+    showUnidentified(
+      "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
+    );
   } catch {
     showUnidentified(
       "Non riesco a identificare automaticamente una società su questa pagina."
@@ -412,27 +656,38 @@ async function inspectActivePage() {
 
 async function copyValue(value, button) {
   if (!value) return;
+
   await navigator.clipboard.writeText(value);
+
   const previous = button.textContent;
   button.textContent = "Copiato";
+
   setTimeout(() => {
     button.textContent = previous;
   }, 1100);
 }
 
 elements.button.addEventListener("click", () =>
-  lookupVat(elements.input.value, { source: "manual", bypassCache: true })
+  lookupVat(elements.input.value, {
+    source: "manual",
+    bypassCache: true
+  })
 );
 
 elements.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
-    lookupVat(elements.input.value, { source: "manual", bypassCache: true });
+    lookupVat(elements.input.value, {
+      source: "manual",
+      bypassCache: true
+    });
   }
 });
 
 elements.input.addEventListener("input", () => {
   const normalized = elements.input.value.replace(/[^0-9ITit\s]/g, "");
-  if (normalized !== elements.input.value) elements.input.value = normalized;
+  if (normalized !== elements.input.value) {
+    elements.input.value = normalized;
+  }
 });
 
 elements.showManual.addEventListener("click", () => {
