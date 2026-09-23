@@ -173,6 +173,23 @@ h2 {
   line-height: 1.4;
 }
 
+.data-completion-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -5px 0 13px;
+  color: #737b8b;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.data-completion-spinner {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+  flex: 0 0 auto;
+}
+
 .financial-section {
   margin-top: 3px;
 }
