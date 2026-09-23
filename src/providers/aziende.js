@@ -678,7 +678,11 @@ export function shouldCacheAziendeMiss(status) {
   return Number(status) === 404;
 }
 
-async function fetchCompanySlug(slug) {
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchCompanySlug(slug, { retryTransient = true } = {}) {
   const key = `aziende:v6:slug:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
@@ -700,7 +704,17 @@ async function fetchCompanySlug(slug) {
       // anti-bot responses must not poison the provider cache for 12 hours.
       if (shouldCacheAziendeMiss(response.status)) {
         await writeCache(key, null);
+        return null;
       }
+
+      if (
+        retryTransient &&
+        (response.status === 429 || response.status >= 500)
+      ) {
+        await wait(450);
+        return fetchCompanySlug(slug, { retryTransient: false });
+      }
+
       return null;
     }
 
@@ -728,11 +742,12 @@ async function fetchCompanySlug(slug) {
 async function firstVatMatch(slugs, vat) {
   const uniqueSlugs = unique(slugs).slice(0, MAX_SLUGS);
 
-  for (let i = 0; i < uniqueSlugs.length; i += 4) {
-    const batch = uniqueSlugs.slice(i, i + 4);
-    const values = await Promise.all(batch.map((slug) => fetchCompanySlug(slug)));
-    const match = values.find((company) => company?.vat === vat);
-    if (match) return match;
+  // VAT lookups normally have a good legal name from VIES/page evidence.
+  // Query candidates sequentially so the exact slug gets a chance to resolve
+  // before speculative variants can trigger provider throttling.
+  for (const slug of uniqueSlugs) {
+    const company = await fetchCompanySlug(slug);
+    if (company?.vat === vat) return company;
   }
 
   return null;
