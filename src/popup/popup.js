@@ -3,6 +3,7 @@ import { findAziendeCompaniesByContext } from "../providers/aziende.js";
 import {
   mergeBalanceHistories,
   previousBalanceRows,
+  promoteLatestFinancialYear,
   resolveCompanyProviders
 } from "../providers/orchestrator.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
@@ -384,7 +385,28 @@ function enrichCompanyWithXray(company, xray) {
     ? xray.financials.pfn
     : financials.pfn ?? null;
 
-  company.financials = financials;
+  if (
+    Number.isFinite(xray.financials.year) &&
+    (
+      Number.isFinite(xray.financials.revenue) ||
+      Number.isFinite(xray.financials.profit)
+    )
+  ) {
+    financials.balanceHistory = mergeBalanceHistories(
+      financials.balanceHistory,
+      [{
+        year: xray.financials.year,
+        revenue: Number.isFinite(xray.financials.revenue)
+          ? xray.financials.revenue
+          : null,
+        profit: Number.isFinite(xray.financials.profit)
+          ? xray.financials.profit
+          : null
+      }]
+    );
+  }
+
+  company.financials = promoteLatestFinancialYear(financials);
   company.providers = unique([...(company.providers || []), xray.provider]);
   company.provider = company.providers.join(" · ");
   return company;
@@ -444,7 +466,7 @@ function enrichCompanyWithFallback(company, fallback) {
       financials.revenue.value / financials.employees.value;
   }
 
-  company.financials = financials;
+  company.financials = promoteLatestFinancialYear(financials);
   company.providers = unique([
     ...(company.providers || []),
     fallback.provider
