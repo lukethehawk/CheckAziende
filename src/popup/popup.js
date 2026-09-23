@@ -1,6 +1,10 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
 import { findAziendeCompaniesByContext } from "../providers/aziende.js";
-import { resolveCompanyProviders } from "../providers/orchestrator.js";
+import {
+  mergeBalanceHistories,
+  previousBalanceRows,
+  resolveCompanyProviders
+} from "../providers/orchestrator.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
 import { buildDomainLookupContext, uniqueBrandHints } from "../domain.js";
 import {
@@ -251,8 +255,8 @@ function renderCompanyBadges(company) {
   );
 }
 
-function renderBalanceHistory(history) {
-  const rows = Array.isArray(history) ? history.slice(0, 3) : [];
+function renderBalanceHistory(history, currentYear) {
+  const rows = previousBalanceRows(history, currentYear, 3);
   elements.balanceHistorySection.classList.toggle("hidden", !rows.length);
   elements.balanceHistorySection.open = false;
   elements.balanceHistoryCount.textContent = rows.length
@@ -419,13 +423,10 @@ function enrichCompanyWithFallback(company, fallback) {
     }
   }
 
-  if (
-    (!Array.isArray(financials.balanceHistory) || financials.balanceHistory.length < 2) &&
-    Array.isArray(fallbackFinancials.balanceHistory) &&
-    fallbackFinancials.balanceHistory.length
-  ) {
-    financials.balanceHistory = fallbackFinancials.balanceHistory;
-  }
+  financials.balanceHistory = mergeBalanceHistories(
+    financials.balanceHistory,
+    fallbackFinancials.balanceHistory
+  );
 
   if (!Number.isFinite(financials.netMargin) &&
       Number.isFinite(financials.profit?.value) &&
@@ -652,7 +653,10 @@ function renderCompany(
   renderCompanyBadges(company);
   renderFinancials(company?.financials);
   renderAteco(company?.ateco);
-  renderBalanceHistory(company?.financials?.balanceHistory);
+  renderBalanceHistory(
+    company?.financials?.balanceHistory,
+    company?.financials?.revenue?.year
+  );
   renderProviderSource(company);
   renderContacts(currentScan);
 
