@@ -1,28 +1,58 @@
 # CheckAziende
 
-Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda collegata al sito aperto e raccoglie dati societari da fonti pubbliche.
+Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda collegata al sito aperto e prepara una scheda societaria da fonti pubbliche.
 
-## MVP 0.1.0
+## Stato
 
-La prima versione include:
+Versione `0.3.0`.
 
-- rilevamento automatico della Partita IVA italiana nella pagina corrente;
-- controllo del checksum della P.IVA;
-- priorità a footer, aree legali e contesti con "Partita IVA" / "P.IVA";
-- fallback sull'intero testo/HTML della pagina;
-- inserimento manuale;
-- verifica VIES della Commissione europea;
-- visualizzazione di ragione sociale e sede quando VIES le restituisce;
-- cache locale di 24 ore;
-- architettura a provider pronta per aggiungere fonti economico-finanziarie.
+Il flusso di identificazione è volutamente conservativo:
 
-> VIES verifica l'abilitazione agli scambi intracomunitari. Una P.IVA italiana può essere formalmente valida e attiva in Italia anche se non risulta in VIES.
+1. cerca una P.IVA esplicita nella pagina, dando priorità a dati strutturati, footer e aree legali;
+2. se non trova nulla, controlla un piccolo insieme di pagine same-origin come Privacy, Note legali, Contatti e Chi siamo;
+3. distingue host, sottodominio e dominio registrabile, ad esempio `frontend.computergross.it` → `computergross.it`;
+4. raccoglie indizi di brand da titolo, `og:site_name`, application name, H1 e logo;
+5. assegna una confidence al risultato;
+6. se l'evidenza non basta, mostra **Non identificata** invece di attribuire numeri presenti casualmente nella pagina.
+
+## Confidence engine
+
+Le evidenze vengono normalizzate e pesate. Esempi:
+
+- VAT/P.IVA in dati strutturati: evidenza molto forte;
+- P.IVA esplicita in footer o area legale: evidenza molto forte;
+- P.IVA in Privacy / Note legali / Contatti: evidenza forte;
+- dominio principale coincidente con quello della società: evidenza importante;
+- ragione sociale coerente con dominio, titolo e brand: evidenza utile ma non sufficiente da sola.
+
+Soglie UI:
+
+- `>= 90`: **Identificata**
+- `65–89`: **Possibile corrispondenza**
+- `< 65`: **Non identificata**
+
+Un match basato soltanto su dominio/nome viene limitato a un massimo di 89 finché non esiste una conferma più forte. Questo evita che un semplice logo o un nome simile diventino una falsa identificazione.
+
+## Identificazione dei domini
+
+`src/domain.js` espone un contesto riutilizzabile dai provider societari:
+
+```text
+hostname: frontend.computergross.it
+registrableDomain: computergross.it
+rootLabel: computergross
+subdomain: frontend
+brandHints: [...]
+searchNames: [...]
+```
+
+La gestione dei public suffix multilivello copre i casi più comuni (ad esempio `.co.uk`, `.com.au`, `.co.jp`). In futuro può essere sostituita da una Public Suffix List completa senza cambiare l'interfaccia del motore.
 
 ## Privacy
 
 CheckAziende non richiede accesso permanente a tutti i siti.
 
-La pagina corrente viene analizzata localmente solo quando l'utente apre l'estensione, tramite i permessi `activeTab` e `scripting`. Per la verifica VIES viene trasmessa soltanto la Partita IVA rilevata o inserita.
+La pagina corrente viene analizzata localmente solo quando l'utente apre l'estensione tramite `activeTab` e `scripting`. Le pagine Privacy/Contatti/Legal vengono controllate soltanto sullo stesso origin. Per la verifica VIES viene trasmessa soltanto la Partita IVA.
 
 ## Installazione temporanea su Firefox
 
@@ -30,21 +60,32 @@ La pagina corrente viene analizzata localmente solo quando l'utente apre l'esten
 2. Apri `about:debugging#/runtime/this-firefox`.
 3. Clicca **Carica componente aggiuntivo temporaneo**.
 4. Seleziona `manifest.json`.
-5. Apri un sito aziendale e clicca CheckAziende.
+5. Apri un sito e clicca CheckAziende.
 
-Dopo una modifica al codice, usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
+Dopo una modifica usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
 
-L'installazione temporanea viene rimossa al riavvio di Firefox. Una distribuzione stabile richiederà la firma Mozilla.
+## Test
 
-## Chrome / Edge / Opera
+```bash
+npm test
+```
 
-Il progetto usa Manifest V3 e può essere caricato anche come estensione non pacchettizzata nei browser Chromium.
+I test coprono anche:
+
+- `frontend.computergross.it` → `computergross.it`;
+- dominio `.co.uk`;
+- normalizzazione delle forme societarie;
+- match P.IVA forte;
+- match dominio/nome che deve restare **Possibile corrispondenza**;
+- mapping dominio-società confermato che può diventare **Identificata**.
 
 ## Struttura
 
 ```text
 manifest.json
 src/
+  confidence.js
+  domain.js
   scanner.js
   providers/
     vies.js
@@ -52,22 +93,17 @@ src/
     popup.html
     popup.css
     popup.js
+tests/
+  domain-confidence.test.mjs
 ```
 
-## Roadmap
+## Prossimi passi
 
-La prossima fase è il nucleo "QuantoFattura-like":
-
-- fatturato e anno di riferimento;
-- utile/perdita;
-- dipendenti;
-- codice ATECO;
-- forma giuridica;
-- capitale sociale;
+- provider societario per ricerca per P.IVA, dominio e ragione sociale;
+- fatturato, utile/perdita, dipendenti, ATECO e dati anagrafici;
+- stato **Possibile corrispondenza** alimentato dal provider quando il sito non pubblica la P.IVA;
+- feedback **È questa / Non è questa** con backend e protezione da abuso;
 - fallback tra più fonti pubbliche;
-- indicazione della fonte di ogni dato;
-- gestione di più P.IVA trovate nella stessa pagina;
-- ricerca controllata delle pagine Contatti / Privacy / Note legali quando la homepage non contiene la P.IVA;
 - packaging e release Firefox/Chromium.
 
-Le integrazioni con fonti terze devono essere isolate in moduli provider, in modo da poter disabilitare o sostituire una fonte senza rompere l'estensione.
+Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.
