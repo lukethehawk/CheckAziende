@@ -785,33 +785,50 @@ async function lookupVat(
   const stillShowingVat = () =>
     companyIsVisible && digitsOnly(elements.vat.textContent) === vat;
 
-  if (resolved.backgroundVerification) {
-    resolved.backgroundVerification.then((update) => {
-      if (!update?.registro || !stillShowingVat()) return;
+  const attachProviderUpdates = (providerResult) => {
+    if (!providerResult) return;
 
-      renderResolved({
-        ...resolved,
-        registro: update.registro,
-        verification: update.verification
+    if (providerResult.backgroundCanonical) {
+      providerResult.backgroundCanonical.then((update) => {
+        if (!update || !stillShowingVat()) return;
+        renderResolved({
+          ...providerResult,
+          ...update,
+          primary: update.aziende || update.primary
+        });
       });
-    });
-  }
+    }
+
+    if (providerResult.backgroundXray) {
+      providerResult.backgroundXray.then((xray) => {
+        if (!xray || !stillShowingVat()) return;
+        renderResolved({
+          ...providerResult,
+          xray
+        });
+      });
+    }
+
+    if (providerResult.backgroundVerification) {
+      providerResult.backgroundVerification.then((update) => {
+        if (!update?.registro || !stillShowingVat()) return;
+
+        renderResolved({
+          ...providerResult,
+          registro: update.registro,
+          verification: update.verification
+        });
+      });
+    }
+  };
+
+  attachProviderUpdates(resolved);
 
   if (resolved.backgroundRefresh) {
     resolved.backgroundRefresh.then((fresh) => {
       if (!fresh || !stillShowingVat()) return;
       renderResolved(fresh);
-
-      if (fresh.backgroundVerification) {
-        fresh.backgroundVerification.then((update) => {
-          if (!update?.registro || !stillShowingVat()) return;
-          renderResolved({
-            ...fresh,
-            registro: update.registro,
-            verification: update.verification
-          });
-        });
-      }
+      attachProviderUpdates(fresh);
     });
   }
 
