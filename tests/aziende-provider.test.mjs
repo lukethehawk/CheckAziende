@@ -227,3 +227,60 @@ test("builds province-disambiguated slug for Rubino", () => {
   assert.ok(slugs.includes("rubino-s-r-l-SA"));
   assert.ok(slugs.indexOf("rubino-s-r-l-SA") < 10);
 });
+
+
+test("does not misclassify an active company because FAQ contains cessata", () => {
+  const text = `
+RUBINO - S.R.L.
+Attiva SOCIETA' A RESPONSABILITA' LIMITATA Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016
+P.IVA 05488440651 REA SA-450078
+€ 2.277.793
+Fatturato 2024
+14
+Dipendenti
+Rubino - S.r.l. è un'impresa attiva o cessata?
+Rubino - S.r.l. risulta attualmente un'impresa attiva.
+Imprese Cessata
+`;
+
+  const company = parseAziendeText(text, {
+    name: "RUBINO - S.R.L."
+  });
+
+  assert.equal(company.status, "Attiva");
+});
+
+test("keeps a genuinely ceased status even if later text says active", () => {
+  const text = `
+AZIENDA CHIUSA SRL
+Cessata SOCIETA' A RESPONSABILITA' LIMITATA Roma (RM)
+P.IVA 12345678903 REA RM-123456
+Domande Frequenti
+La società era attiva negli anni precedenti.
+`;
+
+  const company = parseAziendeText(text, {
+    name: "AZIENDA CHIUSA SRL"
+  });
+
+  assert.equal(company.status, "Cessata");
+});
+
+test("parses thousands-separated employee counts", () => {
+  const text = `
+POSTE ITALIANE SPA
+Attiva SOCIETA' PER AZIONI Roma (RM) ATECO 53.1 dal 1997
+P.IVA 01114601006 REA RM-842633
+€ 10.503.829.486
+Fatturato 2024
+118.558
+Dipendenti
+`;
+
+  const company = parseAziendeText(text, {
+    name: "POSTE ITALIANE SPA"
+  });
+
+  assert.equal(company.financials.employees.value, 118558);
+  assert.equal(company.financials.employees.display, "118558");
+});

@@ -484,3 +484,57 @@ input:focus {
   font-size: 10px;
   text-align: right;
 }
+
+.company-fact-badge.status-active {
+  background: #eef3ff;
+  color: #3159c7;
+}
+
+.company-fact-badge.status-closed {
+  background: #fff0f0;
+  color: #c13b3b;
+}
+
+.balance-history-section {
+  border-top: 1px solid #eceef2;
+  border-bottom: 1px solid #eceef2;
+}
+
+.balance-history-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.balance-history-summary::-webkit-details-marker {
+  display: none;
+}
+
+.balance-history-summary::after {
+  content: "⌄";
+  margin-left: auto;
+  color: #8a8f99;
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+
+.balance-history-section[open] .balance-history-summary::after {
+  transform: rotate(180deg);
+}
+
+.balance-history-count {
+  margin-left: auto;
+  color: #8a8f99;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.balance-history-section[open] .balance-history {
+  margin-bottom: 4px;
+}
