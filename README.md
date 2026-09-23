@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.1`.
+Versione `0.7.3`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -180,3 +180,8 @@ Queste regole preparano il futuro score rosso-verde evitando di confondere dati 
 ## Refactor 0.7.1
 
 La normalizzazione della società e l'arricchimento fra Aziende.it, RegistroAziende e Xray sono stati spostati in `src/company.js`. Il popup resta responsabile del flusso e del rendering, mentre il modello dati è ora isolato e testabile separatamente. Questo riduce il rischio di regressioni quando verranno aggiunti nuovi provider o lo score finanziario visibile.
+
+
+## UI 0.7.3
+
+Quando una scheda azienda è già visibile ma uno o più provider stanno ancora completando i dati, compare in alto una piccola riga `Completamento dati in corso…`. L'indicatore appare solo se il caricamento in background dura più di circa 350 ms e scompare automaticamente quando le richieste pendenti terminano. La logica di identificazione, merge e priorità dei provider non viene modificata.
