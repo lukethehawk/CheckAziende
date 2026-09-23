@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.5`.
+Versione `0.7.6`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -195,3 +195,8 @@ Il provider Xray non memorizza più per 24 ore errori HTTP temporanei come risul
 ## Site-owner fallback 0.7.5
 
 Le pagine Privacy/Legal possono ora fornire anche la ragione sociale del titolare del sito, non solo P.IVA e contatti. Questo copre portali come Xray Finance, la cui Privacy identifica `Xray Finance Srl` ma non ripete la P.IVA. Inoltre il testo di un link same-origin alla home viene considerato un segnale di brand del sito, utile quando il logo è testuale. La logica dei provider e dei dati finanziari resta invariata.
+
+
+## Cache fix 0.7.6
+
+Dopo il fix Xray 0.7.4 viene invalidato anche lo snapshot generale dell'orchestratore. Questo evita che una società già memorizzata senza Xray continui a riutilizzare per 24 ore un risultato incompleto senza eseguire la nuova ricerca Xray.

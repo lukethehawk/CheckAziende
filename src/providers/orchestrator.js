@@ -317,7 +317,7 @@ export function needsFallback(company, options = {}) {
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v4:${vat}`;
+  return `provider-orchestrator:v5:${vat}`;
 }
 
 async function readSnapshot(vat) {
