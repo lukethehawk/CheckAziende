@@ -191,7 +191,9 @@ function inferRevenue(lines) {
   const value = findMoneyBefore(lines, /^Fatturato\s+20\d{2}$/i);
   const year = findYearFromLine(lines, /^Fatturato\s+20\d{2}$/i);
 
-  if (value !== null) return { value, year };
+  if (value !== null) {
+    return { value, year, source: "Aziende.it", isFiled: true };
+  }
 
   const tableValue = findLabelValue(lines, ["Fatturato"]);
   if (!tableValue) return null;
@@ -201,7 +203,9 @@ function inferRevenue(lines) {
 
   return amount === null ? null : {
     value: amount,
-    year: yearMatch ? Number(yearMatch[1]) : null
+    year: yearMatch ? Number(yearMatch[1]) : null,
+    source: "Aziende.it",
+    isFiled: true
   };
 }
 
@@ -219,7 +223,9 @@ function inferProfit(lines) {
 
   return amount === null ? null : {
     value: amount,
-    year: yearMatch ? Number(yearMatch[1]) : null
+    year: yearMatch ? Number(yearMatch[1]) : null,
+    source: "Aziende.it",
+    isFiled: true
   };
 }
 
@@ -282,7 +288,9 @@ function inferBalanceHistory(lines) {
       delta,
       profit: moneyValues[1] ?? null,
       employees,
-      capital: moneyValues[2] ?? null
+      capital: moneyValues[2] ?? null,
+      source: "Aziende.it",
+      isFiled: true
     });
   }
 
@@ -346,7 +354,9 @@ export function parseBalanceHistoryRows(rows) {
         : null,
       profit: parseMoney(row[profitIndex]) ?? null,
       employees: Number.isFinite(employeeValue) ? employeeValue : null,
-      capital: parseMoney(row[capitalIndex]) ?? null
+      capital: parseMoney(row[capitalIndex]) ?? null,
+      source: "Aziende.it",
+      isFiled: true
     });
 
     if (history.length >= 3) break;
@@ -577,10 +587,10 @@ async function readCache(key) {
   try {
     const stored = await api.storage.local.get(key);
     const entry = stored?.[key];
-    if (!entry || Date.now() - entry.cachedAt > CACHE_TTL_MS) return null;
+    if (!entry || Date.now() - entry.cachedAt > CACHE_TTL_MS) return undefined;
     return entry.value;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -598,9 +608,9 @@ async function writeCache(key, value) {
 }
 
 async function fetchCompanySlug(slug) {
-  const key = `aziende:v4:slug:${slug}`;
+  const key = `aziende:v5:slug:${slug}`;
   const cached = await readCache(key);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
 
   const url = `${BASE_URL}/${encodeURIComponent(slug)}`;
 
@@ -620,18 +630,37 @@ async function fetchCompanySlug(slug) {
     }
 
     const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("text/html")) return null;
+    if (!contentType.includes("text/html")) {
+      await writeCache(key, null);
+      return null;
+    }
 
     const html = await response.text();
     const company = parseAziendePage(html, response.url || url);
 
-    if (!company?.vat) return null;
+    if (!company?.vat) {
+      await writeCache(key, null);
+      return null;
+    }
 
     await writeCache(key, company);
     return company;
   } catch {
     return null;
   }
+}
+
+async function firstVatMatch(slugs, vat) {
+  const uniqueSlugs = unique(slugs).slice(0, MAX_SLUGS);
+
+  for (let i = 0; i < uniqueSlugs.length; i += 4) {
+    const batch = uniqueSlugs.slice(i, i + 4);
+    const values = await Promise.all(batch.map((slug) => fetchCompanySlug(slug)));
+    const match = values.find((company) => company?.vat === vat);
+    if (match) return match;
+  }
+
+  return null;
 }
 
 async function fetchCandidates(slugs) {
@@ -662,11 +691,10 @@ export async function findAziendeCompanyByVat(
   const targetVat = String(vat || "").replace(/\D/g, "");
   if (!/^\d{11}$/.test(targetVat)) return null;
 
-  const candidates = await fetchCandidates(
-    buildSlugCandidates(names, { provinceHints })
+  return firstVatMatch(
+    buildSlugCandidates(names, { provinceHints }),
+    targetVat
   );
-
-  return candidates.find((company) => company.vat === targetVat) || null;
 }
 
 export async function findAziendeCompaniesByContext({

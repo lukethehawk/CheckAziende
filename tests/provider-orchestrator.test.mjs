@@ -168,14 +168,10 @@ test("newer verified year becomes the headline financial year", () => {
     ]
   });
 
-  assert.deepEqual(financials.revenue, {
-    value: 1_820_000,
-    year: 2025
-  });
-  assert.deepEqual(financials.profit, {
-    value: 266_000,
-    year: 2025
-  });
+  assert.equal(financials.revenue.value, 1_820_000);
+  assert.equal(financials.revenue.year, 2025);
+  assert.equal(financials.profit.value, 266_000);
+  assert.equal(financials.profit.year, 2025);
   assert.ok(Math.abs(financials.netMargin - 14.6153846154) < 0.001);
   assert.equal(financials.revenuePerEmployee, 606666.6666666666);
 
@@ -264,4 +260,60 @@ test("fresh contiguous history does not trigger verifier refresh", () => {
     }),
     false
   );
+});
+
+
+test("merged history preserves filed provenance from either provider", () => {
+  const merged = mergeBalanceHistories(
+    [
+      {
+        year: 2025,
+        revenue: 2_000_000,
+        source: "Xray Finance",
+        isFiled: false
+      }
+    ],
+    [
+      {
+        year: 2025,
+        revenue: 1_990_000,
+        profit: 200_000,
+        source: "RegistroAziende.it",
+        isFiled: true
+      }
+    ]
+  );
+
+  assert.equal(merged[0].revenue, 2_000_000);
+  assert.equal(merged[0].profit, 200_000);
+  assert.equal(merged[0].isFiled, true);
+  assert.deepEqual(
+    new Set(merged[0].sources),
+    new Set(["Xray Finance", "RegistroAziende.it"])
+  );
+});
+
+test("promoted headline keeps source and filed metadata", () => {
+  const financials = promoteLatestFinancialYear({
+    revenue: {
+      value: 1_900_000,
+      year: 2024,
+      source: "Aziende.it",
+      isFiled: true
+    },
+    balanceHistory: [
+      {
+        year: 2025,
+        revenue: 2_000_000,
+        profit: 210_000,
+        source: "RegistroAziende.it",
+        isFiled: true
+      }
+    ]
+  });
+
+  assert.equal(financials.revenue.year, 2025);
+  assert.equal(financials.revenue.source, "RegistroAziende.it");
+  assert.equal(financials.revenue.isFiled, true);
+  assert.equal(financials.profit.source, "RegistroAziende.it");
 });

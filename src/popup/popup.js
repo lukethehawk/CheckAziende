@@ -360,11 +360,21 @@ function enrichCompanyWithXray(company, xray) {
   }
 
   if (!Number.isFinite(financials.revenue?.value) && Number.isFinite(xray.financials.revenue)) {
-    financials.revenue = { value: xray.financials.revenue, year };
+    financials.revenue = {
+      value: xray.financials.revenue,
+      year,
+      source: "Xray Finance",
+      isFiled: false
+    };
   }
 
   if (!Number.isFinite(financials.profit?.value) && Number.isFinite(xray.financials.profit)) {
-    financials.profit = { value: xray.financials.profit, year };
+    financials.profit = {
+      value: xray.financials.profit,
+      year,
+      source: "Xray Finance",
+      isFiled: false
+    };
   }
 
   if (
@@ -401,7 +411,9 @@ function enrichCompanyWithXray(company, xray) {
           : null,
         profit: Number.isFinite(xray.financials.profit)
           ? xray.financials.profit
-          : null
+          : null,
+        source: "Xray Finance",
+        isFiled: false
       }]
     );
   }

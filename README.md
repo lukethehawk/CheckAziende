@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.5.0`.
+Versione `0.7.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -89,6 +89,10 @@ src/
   scanner.js
   providers/
     vies.js
+    aziende.js
+    xray.js
+    registroaziende.js
+    orchestrator.js
   popup/
     popup.html
     popup.css
@@ -114,9 +118,10 @@ L'accesso cross-origin è limitato a `www.aziende.it` e VIES.
 ## Prossimi passi
 
 - feedback **È questa / Non è questa** con backend e protezione da abuso;
-- secondo provider/fallback per aumentare copertura e resilienza;
-- storico degli ultimi bilanci;
 - ricerca manuale anche per ragione sociale;
+- Public Suffix List completa per i domini internazionali;
+- fixture HTML reali per i provider;
+- separazione ulteriore tra controller e renderer del popup;
 - packaging e release Firefox/Chromium.
 
 Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.
@@ -152,3 +157,20 @@ La versione 0.6.0 introduce un orchestratore dei provider con priorità alla vel
 RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
 
 ReportAziende è predisposto come possibile provider futuro, ma la sua API ufficiale richiede un token Bearer. CompanyReports e UfficioCamerale non vengono interrogati automaticamente finché richiedono login/acquisti o non offrono un accesso pubblico stabile: aggiungerli al fast path aumenterebbe latenza e fragilità senza un beneficio proporzionato.
+
+
+## Hardening 0.7.0
+
+La versione 0.7.0 introduce un passaggio di hardening qualitativo senza modificare la UX:
+
+- la cache negativa di Aziende.it distingue correttamente un miss memorizzato da una cache assente;
+- il lookup Aziende.it per P.IVA termina appena trova un match valido, senza scandire inutilmente tutti gli slug candidati;
+- VAT/P.IVA presenti nei metadati di pagine directory vengono trattati come evidenza debole se non coerenti con dominio/brand;
+- gli anni finanziari mantengono la provenienza (`source`, `sources`) e l'indicazione `isFiled`;
+- Xray Finance può arricchire i dati economici ma non viene considerato, da solo, prova di bilancio depositato;
+- il requisito interno "almeno due bilanci depositati" conta soltanto esercizi marcati come depositati dalle fonti societarie;
+- i risultati di RegistroAziende ottenuti da parser DOM e parser testuale vengono fusi per anno anziché sostituiti;
+- uno snapshot provider ancora fresco non viene aggiornato ad ogni apertura: il refresh di rete parte solo quando la cache è stale;
+- la CI esegue anche un controllo sintattico esplicito sui moduli dell'estensione.
+
+Queste regole preparano il futuro score rosso-verde evitando di confondere dati economici osservati con bilanci effettivamente depositati.

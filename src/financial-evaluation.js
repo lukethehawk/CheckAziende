@@ -64,6 +64,7 @@ export function evaluateFinancialProfile(company, { now = new Date() } = {}) {
   const history = Array.isArray(financials.balanceHistory)
     ? financials.balanceHistory.slice(0, 3)
     : [];
+  const filedHistory = history.filter((item) => item?.isFiled === true);
   const status = String(company?.status || "").toLowerCase();
   const active = /^attiva\b/.test(status);
   const closed = /cessat|inattiv|chius|liquidaz|fallit/.test(status);
@@ -95,11 +96,17 @@ export function evaluateFinancialProfile(company, { now = new Date() } = {}) {
   factors.push({ key: "age", points: agePoints, max: 10, value: age });
 
   let balancePoints = 0;
-  if (history.length >= 3) balancePoints = 15;
-  else if (history.length >= 2) balancePoints = 12;
-  else if (history.length === 1) balancePoints = 4;
+  if (filedHistory.length >= 3) balancePoints = 15;
+  else if (filedHistory.length >= 2) balancePoints = 12;
+  else if (filedHistory.length === 1) balancePoints = 4;
   score += balancePoints;
-  factors.push({ key: "balanceHistory", points: balancePoints, max: 15, value: history.length });
+  factors.push({
+    key: "balanceHistory",
+    points: balancePoints,
+    max: 15,
+    value: filedHistory.length,
+    observedFinancialYears: history.length
+  });
 
   let ebitdaPoints = 0;
   if (Number.isFinite(ebitdaPct)) {
@@ -156,7 +163,7 @@ export function evaluateFinancialProfile(company, { now = new Date() } = {}) {
   const availableSignals = [
     company?.status,
     Number.isFinite(age),
-    history.length,
+    filedHistory.length,
     Number.isFinite(ebitdaPct),
     Number.isFinite(netPct),
     Number.isFinite(trendPct)
@@ -172,7 +179,7 @@ export function evaluateFinancialProfile(company, { now = new Date() } = {}) {
       revenueTrend: trendPct
     },
     requirements: {
-      atLeastTwoFiledBalances: history.length >= 2
+      atLeastTwoFiledBalances: filedHistory.length >= 2
     },
     completeness: Math.round((availableSignals / 6) * 100)
   };

@@ -197,3 +197,25 @@ test("domain lookup context does not promote page title to site brand", () => {
   assert.ok(context.searchNames.includes("aziende it") || context.searchNames.includes("aziende"));
   assert.ok(!context.searchNames.includes("future tech"));
 });
+
+
+test("metadata VAT for a third-party profile is not treated as site ownership", () => {
+  const assessment = assessVatMatch({
+    candidate: {
+      vat: "11295150152",
+      source: "metadati",
+      evidenceType: "vat_metadata"
+    },
+    company: {
+      name: "FUTURE TECH SRL"
+    },
+    pageContext: {
+      hostname: "www.aziende.it",
+      title: "Future Tech Srl: fatturato 2024",
+      brandHints: ["Aziende.it"]
+    }
+  });
+
+  assert.equal(assessment.status, "unidentified");
+  assert.ok(assessment.score < 65);
+});
