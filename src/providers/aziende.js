@@ -59,7 +59,10 @@ function parseItalianNumber(value) {
 }
 
 function parseMoney(value) {
-  return parseItalianNumber(value);
+  const match = String(value || "").match(/-?\d[\d.]*?(?:,\d+)?(?=\s*(?:€|euro|EUR|\(|$))/i) ||
+    String(value || "").match(/-?\d[\d.]*(?:,\d+)?/);
+
+  return match ? parseItalianNumber(match[0]) : null;
 }
 
 function findMoneyBefore(lines, labelPattern) {
