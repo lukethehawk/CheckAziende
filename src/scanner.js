@@ -37,6 +37,19 @@ export function scanCurrentPage() {
     return [...new Set(values.filter(Boolean))];
   }
 
+  function evidenceTypeForSource(source) {
+    const value = String(source || "").toLowerCase();
+    if (value.includes("dati strutturati")) return "vat_structured";
+    if (value.includes("metadati")) return "vat_metadata";
+    if (value.includes("privacy")) return "vat_privacy";
+    if (value.includes("note legali") || value.includes("legal")) return "vat_related_legal";
+    if (value.includes("contatti") || value.includes("contact")) return "vat_contact";
+    if (value.includes("pagina azienda") || value.includes("about")) return "vat_company_page";
+    if (value.includes("footer testuale")) return "vat_footer_text";
+    if (value.includes("footer") || value.includes("area legale")) return "vat_legal";
+    return "vat_other_labeled";
+  }
+
   function upsertCandidate(candidates, candidate) {
     const previous = candidates.get(candidate.vat);
     if (!previous || candidate.score > previous.score) {
@@ -71,6 +84,7 @@ export function scanCurrentPage() {
         vat,
         score,
         source,
+        evidenceType: evidenceTypeForSource(source),
         confidence: "high",
         context
       });
@@ -85,6 +99,7 @@ export function scanCurrentPage() {
       vat,
       score: 140,
       source,
+      evidenceType: evidenceTypeForSource(source),
       confidence: "high",
       context: "Dati strutturati del sito"
     });
@@ -300,12 +315,22 @@ export function scanCurrentPage() {
     document.title?.trim() ||
     location.hostname;
 
+  const brandHints = unique([
+    document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim(),
+    document.querySelector('meta[name="application-name"]')?.getAttribute("content")?.trim(),
+    document.querySelector("h1")?.textContent?.trim(),
+    ...[...document.querySelectorAll('img[alt]')]
+      .filter((node) => /logo|brand/i.test(node.className || "") || /logo|brand/i.test(node.id || ""))
+      .map((node) => node.getAttribute("alt")?.trim())
+  ]).slice(0, 8);
+
   return {
     url: location.href,
     origin: location.origin,
     hostname: location.hostname,
     title: document.title,
     siteName,
+    brandHints,
     relatedUrls: discoverRelatedUrls(),
     contacts: {
       emails,
@@ -423,10 +448,21 @@ export async function scanRelatedPages(urls) {
 
         if (!VAT_LABEL_PATTERN.test(context)) continue;
 
+        const evidenceType = label === "privacy policy"
+          ? "vat_privacy"
+          : label === "note legali"
+            ? "vat_related_legal"
+            : label === "pagina contatti"
+              ? "vat_contact"
+              : label === "pagina azienda"
+                ? "vat_company_page"
+                : "vat_other_labeled";
+
         candidates.push({
           vat,
           score: 130,
           source: label,
+          evidenceType,
           confidence: "high",
           context,
           url: response.url || url.href
