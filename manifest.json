@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CheckAziende",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Identifica l'azienda del sito aperto e raccoglie dati societari da fonti pubbliche.",
   "permissions": [
     "activeTab",
@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://ec.europa.eu/*",
     "https://www.aziende.it/*",
-    "https://xrayfinance.it/*"
+    "https://xrayfinance.it/*",
+    "https://registroaziende.it/*"
   ],
   "action": {
     "default_title": "CheckAziende",
