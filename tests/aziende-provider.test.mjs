@@ -313,3 +313,15 @@ test("parses balance history from HTML table cell rows", () => {
   assert.equal(history[0].employees, 14);
   assert.equal(history[1].employees, null);
 });
+
+
+test("builds Italian subsidiary variants only for domain-context lookup", () => {
+  const normal = buildSlugCandidates(["Creditsafe"]);
+  const domainFallback = buildSlugCandidates(["Creditsafe"], {
+    includeItalianBrandVariants: true
+  });
+
+  assert.equal(normal.includes("creditsafe-italia-s-r-l"), false);
+  assert.ok(domainFallback.includes("creditsafe-italia-s-r-l"));
+  assert.ok(domainFallback.indexOf("creditsafe-italia-s-r-l") < 12);
+});

@@ -438,7 +438,10 @@ function normalizeProvinceHints(values) {
     .slice(0, 4);
 }
 
-export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
+export function buildSlugCandidates(
+  names,
+  { provinceHints = [], includeItalianBrandVariants = false } = {}
+) {
   const legalVariants = [
     "srl",
     "s-r-l",
@@ -455,6 +458,14 @@ export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
     "sas",
     "inc",
     "ltd"
+  ];
+  const territorialLegalVariants = [
+    "srl",
+    "s-r-l",
+    "societa-a-responsabilita-limitata",
+    "spa",
+    "s-p-a",
+    "societa-per-azioni"
   ];
 
   const generic = new Set([
@@ -481,6 +492,8 @@ export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
   const uniqueBases = unique(bases);
   const provinces = normalizeProvinceHints(provinceHints);
   const result = [];
+  const hasLegalSuffix = (slug) =>
+    /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd|societa-per-azioni|societa-a-responsabilita-limitata|societa-a-responsabilita-limitata-semplificata)(?:$|-)/.test(slug);
 
   // Exact and expanded names first.
   for (const slug of uniqueBases) {
@@ -492,13 +505,43 @@ export function buildSlugCandidates(names, { provinceHints = [] } = {}) {
     }
   }
 
+  // Italian subsidiaries of international brands frequently include a
+  // territorial qualifier in the legal name even when the public site only
+  // exposes the global brand (e.g. creditsafe.com -> Creditsafe Italia Srl).
+  // Keep this expansion limited to domain/name inference so normal VAT
+  // enrichment does not pay the extra lookup cost.
+  if (includeItalianBrandVariants) {
+    for (const slug of uniqueBases) {
+      if (hasLegalSuffix(slug)) continue;
+
+      for (const qualifier of ["italia", "italy"]) {
+        const qualified = `${slug}-${qualifier}`;
+        result.push(qualified);
+
+        for (const province of provinces) {
+          result.push(`${qualified}-${province}`);
+        }
+
+        for (const suffix of territorialLegalVariants) {
+          const candidate = `${qualified}-${suffix}`;
+          result.push(candidate);
+
+          for (const province of provinces) {
+            result.push(`${candidate}-${province}`);
+          }
+
+          if (result.length >= MAX_SLUGS) {
+            return unique(result).slice(0, MAX_SLUGS);
+          }
+        }
+      }
+    }
+  }
+
   // Then generate legal-form variants for brand-only names.
   for (const suffix of legalVariants) {
     for (const slug of uniqueBases) {
-      const hasLegalSuffix =
-        /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd|societa-per-azioni|societa-a-responsabilita-limitata|societa-a-responsabilita-limitata-semplificata)(?:$|-)/.test(slug);
-
-      if (hasLegalSuffix) continue;
+      if (hasLegalSuffix(slug)) continue;
 
       const candidate = `${slug}-${suffix}`;
       result.push(candidate);
@@ -704,6 +747,9 @@ export async function findAziendeCompaniesByContext({
   if (!names?.length) return [];
 
   return fetchCandidates(
-    buildSlugCandidates(names, { provinceHints })
+    buildSlugCandidates(names, {
+      provinceHints,
+      includeItalianBrandVariants: true
+    })
   );
 }

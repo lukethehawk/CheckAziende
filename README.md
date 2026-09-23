@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.7`.
+Versione `0.7.8`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -205,3 +205,8 @@ Dopo il fix Xray 0.7.4 viene invalidato anche lo snapshot generale dell'orchestr
 ## Xray search-first 0.7.7
 
 Il lookup Xray prova ora prima la ricerca pubblica per P.IVA quando la homepage espone un form utilizzabile, e usa l'enumerazione degli slug numerici solo come fallback. Le richieste speculative sono state ridotte a piccoli batch per evitare throttling prima di raggiungere profili disambiguati come `rubino-s-r-l-15`. Il retry con la ragione sociale canonica viene inoltre mantenuto in background e riutilizzato dal popup. Sono state invalidate sia la cache Xray sia la cache dell'orchestratore.
+
+
+## Domain fallback 0.7.8
+
+Quando l'estensione è aperta su un sottodominio applicativo e non trova una P.IVA locale, il fallback per dominio può ora cercare anche la variante italiana del brand nelle fonti pubbliche (es. `creditsafe.com` -> `Creditsafe Italia Srl`). Questa espansione viene usata solo nel lookup per dominio, quindi non aumenta il costo dei normali lookup per P.IVA. Non sono stati aggiunti permessi host globali.
