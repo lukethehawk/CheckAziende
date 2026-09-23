@@ -90,13 +90,16 @@ function findEmployees(lines, text) {
     if (!/^dipendenti(?:\s+\d{4})?$/i.test(lines[i])) continue;
 
     const previous = lines[i - 1] || "";
-    const exact = previous.match(/^([0-9]{1,6})$/);
+    const exact = previous.match(/^([0-9][0-9.]*)$/);
     if (exact) {
-      return {
-        value: Number(exact[1]),
-        display: exact[1],
-        year: findYearFromLine([lines[i]], /dipendenti/i)
-      };
+      const value = parseItalianNumber(exact[1]);
+      if (Number.isFinite(value)) {
+        return {
+          value,
+          display: String(value),
+          year: findYearFromLine([lines[i]], /dipendenti/i)
+        };
+      }
     }
   }
 
@@ -121,10 +124,34 @@ function sanitizeField(value) {
     .trim() || null;
 }
 
-function inferStatus(text) {
-  if (/\bcessata\b/i.test(text)) return "Cessata";
-  if (/\binattiva\b/i.test(text)) return "Inattiva";
-  if (/\battiva\b/i.test(text)) return "Attiva";
+function inferStatus(lines) {
+  const explicit = findLabelValue(lines, [
+    "Stato attività",
+    "Stato attivita",
+    "Stato impresa",
+    "Stato"
+  ]);
+
+  if (explicit) {
+    if (/^attiva\b/i.test(explicit)) return "Attiva";
+    if (/^cessata\b/i.test(explicit)) return "Cessata";
+    if (/^inattiva\b/i.test(explicit)) return "Inattiva";
+    if (/liquidazione/i.test(explicit)) return "In liquidazione";
+  }
+
+  // The company summary is at the top of Aziende.it. Do not scan the whole
+  // page: FAQ and product names can contain words such as "cessata".
+  for (const line of lines.slice(0, 35)) {
+    const match = line.match(/^(Attiva|Cessata|Inattiva|In liquidazione)\b/i);
+    if (!match) continue;
+
+    const normalized = match[1].toLowerCase();
+    if (normalized === "attiva") return "Attiva";
+    if (normalized === "cessata") return "Cessata";
+    if (normalized === "inattiva") return "Inattiva";
+    if (normalized === "in liquidazione") return "In liquidazione";
+  }
+
   return null;
 }
 
@@ -403,7 +430,7 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
     providerUrl: url || null,
     name: sanitizeField(name) || sanitizeField(findLabelValue(lines, ["Ragione Sociale"])) || null,
     vat,
-    status: inferStatus(text),
+    status: inferStatus(lines),
     legalForm: sanitizeField(findLabelValue(lines, ["Natura Giuridica", "Forma"])),
     taxCode: sanitizeField(findLabelValue(lines, ["Codice Fiscale"])),
     rea: inferRea(text) || sanitizeField(findLabelValue(lines, ["REA"])),
@@ -466,7 +493,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchCompanySlug(slug) {
-  const key = `aziende:slug:${slug}`;
+  const key = `aziende:v3:slug:${slug}`;
   const cached = await readCache(key);
   if (cached) return cached;
 
