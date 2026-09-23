@@ -9,6 +9,7 @@ La prima versione include:
 - rilevamento automatico della Partita IVA italiana nella pagina corrente;
 - controllo del checksum della P.IVA;
 - priorità a footer, aree legali e contesti con "Partita IVA" / "P.IVA";
+- fallback sull'intero testo/HTML della pagina;
 - inserimento manuale;
 - verifica VIES della Commissione europea;
 - visualizzazione di ragione sociale e sede quando VIES le restituisce;
@@ -31,6 +32,8 @@ La pagina corrente viene analizzata localmente solo quando l'utente apre l'esten
 4. Seleziona `manifest.json`.
 5. Apri un sito aziendale e clicca CheckAziende.
 
+Dopo una modifica al codice, usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
+
 L'installazione temporanea viene rimossa al riavvio di Firefox. Una distribuzione stabile richiederà la firma Mozilla.
 
 ## Chrome / Edge / Opera
@@ -42,7 +45,7 @@ Il progetto usa Manifest V3 e può essere caricato anche come estensione non pac
 ```text
 manifest.json
 src/
-  content.js
+  scanner.js
   providers/
     vies.js
   popup/
