@@ -24,6 +24,13 @@
       <span id="status">Identificazione azienda…</span>
     </section>
 
+    <section id="unidentified-view" class="unidentified-view hidden">
+      <span class="identity-badge unidentified">Non identificata</span>
+      <p class="unidentified-copy">
+        Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente.
+      </p>
+    </section>
+
     <section id="company-view" class="company-view hidden">
       <div class="identity">
         <span id="identity-badge" class="identity-badge">Identificata</span>
@@ -69,43 +76,35 @@
         </div>
       </section>
 
-      <section id="contacts-section" class="contacts hidden">
-        <article id="email-card" class="contact-card hidden">
-          <div>
-            <span class="contact-label">Email dal sito</span>
-            <a id="company-email" href="#"></a>
-          </div>
-          <button id="copy-email" class="copy-button" type="button">Copia</button>
-        </article>
-
-        <article id="phone-card" class="contact-card hidden">
-          <div>
-            <span class="contact-label">Telefono dal sito</span>
-            <a id="company-phone" href="#"></a>
-          </div>
-          <button id="copy-phone" class="copy-button" type="button">Copia</button>
-        </article>
-
-        <article class="contact-card">
-          <div>
-            <span class="contact-label">Sito web</span>
-            <a id="company-website" href="#" target="_blank" rel="noreferrer"></a>
-          </div>
-          <span class="open-icon" aria-hidden="true">↗</span>
-        </article>
-      </section>
-
       <div class="source-line">
-        <span id="source-status">P.IVA rilevata dal sito</span>
+        <span id="source-status">P.IVA identificata dal sito</span>
         <span aria-hidden="true">•</span>
         <button id="show-manual" class="text-button" type="button">Cambia P.IVA</button>
       </div>
     </section>
 
+    <section id="contacts-section" class="contacts hidden">
+      <article id="email-card" class="contact-card hidden">
+        <div>
+          <span class="contact-label">Email dal sito</span>
+          <a id="company-email" href="#"></a>
+        </div>
+        <button id="copy-email" class="copy-button" type="button">Copia</button>
+      </article>
+
+      <article id="phone-card" class="contact-card hidden">
+        <div>
+          <span class="contact-label">Telefono dal sito</span>
+          <a id="company-phone" href="#"></a>
+        </div>
+        <button id="copy-phone" class="copy-button" type="button">Copia</button>
+      </article>
+    </section>
+
     <section id="manual-panel" class="manual-panel hidden">
-      <p class="manual-title">Inserisci una Partita IVA</p>
+      <p class="manual-title">Cerca manualmente</p>
       <p id="manual-description" class="manual-description">
-        Non sono riuscito a identificarla automaticamente.
+        Inserisci la Partita IVA dell'azienda.
       </p>
       <div class="manual-row">
         <input
@@ -114,7 +113,7 @@
           inputmode="numeric"
           autocomplete="off"
           maxlength="14"
-          placeholder="Es. 12345678901"
+          placeholder="Partita IVA"
           aria-label="Partita IVA"
         >
         <button id="check-button" class="primary-button" type="button">Cerca</button>

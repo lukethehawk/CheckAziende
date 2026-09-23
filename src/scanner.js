@@ -1,5 +1,6 @@
 export function scanCurrentPage() {
-  const LABEL_PATTERN = /(?:partita\s*iva|p\.?\s*iva|piva|vat(?:\s*number)?)/i;
+  const VAT_LABEL_PATTERN = /(?:partita\s*iva|p\.?\s*iva|piva|vat(?:\s*(?:number|id))?)/i;
+  const VAT_NUMBER_PATTERN = /(?:\bIT[\s.:-]*)?(\d{11})\b/gi;
 
   function digitsOnly(value) {
     return String(value || "").replace(/\D/g, "");
@@ -22,108 +23,185 @@ export function scanCurrentPage() {
     return ((10 - (sum % 10)) % 10) === Number(vat[10]);
   }
 
-  function cleanContext(value) {
+  function clean(value, max = 260) {
     return String(value || "")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 220);
-  }
-
-  function collectFromText(text, baseScore, source, candidates) {
-    if (!text) return;
-
-    const regex = /(?:\bIT[\s.:-]*)?(\d{11})\b/gi;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      const vat = digitsOnly(match[1]);
-      if (!isValidItalianVat(vat)) continue;
-
-      const start = Math.max(0, match.index - 110);
-      const end = Math.min(text.length, match.index + match[0].length + 110);
-      const context = cleanContext(text.slice(start, end));
-
-      let score = baseScore;
-      if (LABEL_PATTERN.test(context)) score += 100;
-      if (/registro\s+imprese|rea\b/i.test(context)) score += 20;
-      if (/codice\s*fiscale/i.test(context) && !LABEL_PATTERN.test(context)) score -= 15;
-
-      const previous = candidates.get(vat);
-      if (!previous || score > previous.score) {
-        candidates.set(vat, { vat, score, source, context });
-      }
-    }
+      .slice(0, max);
   }
 
   function unique(values) {
     return [...new Set(values.filter(Boolean))];
   }
 
-  function extractEmails(bodyText) {
-    const fromLinks = [...document.querySelectorAll('a[href^="mailto:" i]')]
-      .map((node) => {
-        const href = node.getAttribute("href") || "";
-        const raw = href.replace(/^mailto:/i, "").split("?")[0].trim();
-        try {
-          return decodeURIComponent(raw);
-        } catch {
-          return raw;
-        }
-      });
-
-    const fromText = bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
-
-    return unique([...fromLinks, ...fromText])
-      .filter((email) => email.length <= 120)
-      .slice(0, 4);
+  function upsertCandidate(candidates, candidate) {
+    const previous = candidates.get(candidate.vat);
+    if (!previous || candidate.score > previous.score) {
+      candidates.set(candidate.vat, candidate);
+    }
   }
 
-  function extractPhones() {
-    return unique(
-      [...document.querySelectorAll('a[href^="tel:" i]')]
-        .map((node) => (node.getAttribute("href") || "").replace(/^tel:/i, "").trim())
-        .map((phone) => phone.replace(/\s+/g, " "))
-    )
-      .filter((phone) => phone.length >= 6 && phone.length <= 40)
-      .slice(0, 4);
+  function collectLabeledVat(text, source, candidates, score = 100) {
+    if (!text || !VAT_LABEL_PATTERN.test(text)) return;
+
+    VAT_NUMBER_PATTERN.lastIndex = 0;
+    let match;
+
+    while ((match = VAT_NUMBER_PATTERN.exec(text)) !== null) {
+      const vat = digitsOnly(match[1]);
+      if (!isValidItalianVat(vat)) continue;
+
+      const start = Math.max(0, match.index - 100);
+      const end = Math.min(text.length, match.index + match[0].length + 100);
+      const context = clean(text.slice(start, end));
+
+      if (!VAT_LABEL_PATTERN.test(context)) continue;
+
+      upsertCandidate(candidates, {
+        vat,
+        score,
+        source,
+        confidence: "high",
+        context
+      });
+    }
+  }
+
+  function collectStructuredVat(value, source, candidates) {
+    const vat = digitsOnly(value);
+    if (!isValidItalianVat(vat)) return;
+
+    upsertCandidate(candidates, {
+      vat,
+      score: 140,
+      source,
+      confidence: "high",
+      context: "Dati strutturati del sito"
+    });
+  }
+
+  function walkStructuredData(value, candidates) {
+    if (!value || typeof value !== "object") return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) walkStructuredData(item, candidates);
+      return;
+    }
+
+    for (const [key, rawValue] of Object.entries(value)) {
+      if (/^(?:vatID|vatId|vatNumber|taxID|taxId)$/i.test(key)) {
+        if (typeof rawValue === "string" || typeof rawValue === "number") {
+          collectStructuredVat(rawValue, "dati strutturati", candidates);
+        }
+      }
+
+      if (rawValue && typeof rawValue === "object") {
+        walkStructuredData(rawValue, candidates);
+      }
+    }
+  }
+
+  function extractStructuredCandidates(candidates) {
+    for (const node of document.querySelectorAll('script[type="application/ld+json"]')) {
+      const raw = node.textContent?.trim();
+      if (!raw) continue;
+
+      try {
+        walkStructuredData(JSON.parse(raw), candidates);
+      } catch {
+        // JSON-LD malformed: ignore it.
+      }
+    }
+  }
+
+  const legalSelector = [
+    "footer",
+    "address",
+    "[class*='footer' i]",
+    "[id*='footer' i]",
+    "[class*='legal' i]",
+    "[id*='legal' i]",
+    "[class*='copyright' i]",
+    "[id*='copyright' i]",
+    "[class*='company-info' i]",
+    "[id*='company-info' i]"
+  ].join(", ");
+
+  let legalNodes = [];
+  try {
+    legalNodes = [...document.querySelectorAll(legalSelector)];
+  } catch {
+    legalNodes = [...document.querySelectorAll("footer, address")];
   }
 
   const candidates = new Map();
+  extractStructuredCandidates(candidates);
 
-  let footerNodes = [];
+  for (const node of legalNodes) {
+    const text = node.innerText || node.textContent || "";
+    collectLabeledVat(text, "footer/area legale", candidates, 120);
+  }
+
+  for (const node of document.querySelectorAll("meta[content]")) {
+    const key = [
+      node.getAttribute("name"),
+      node.getAttribute("property"),
+      node.getAttribute("itemprop")
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    if (!/(?:vat|partita.?iva|tax.?id)/i.test(key)) continue;
+    collectStructuredVat(node.getAttribute("content") || "", "metadati", candidates);
+  }
+
+  const contactSelector = [
+    "footer",
+    "address",
+    "[class*='footer' i]",
+    "[id*='footer' i]",
+    "[class*='contact' i]",
+    "[id*='contact' i]",
+    "[class*='legal' i]",
+    "[id*='legal' i]"
+  ].join(", ");
+
+  let contactNodes = [];
   try {
-    footerNodes = [
-      ...document.querySelectorAll(
-        "footer, address, [class*='footer' i], [id*='footer' i], [class*='legal' i], [id*='legal' i]"
-      )
-    ];
+    contactNodes = [...document.querySelectorAll(contactSelector)];
   } catch {
-    footerNodes = [...document.querySelectorAll("footer, address")];
+    contactNodes = [...document.querySelectorAll("footer, address")];
   }
 
-  for (const node of footerNodes) {
-    collectFromText(node.innerText || node.textContent || "", 70, "footer", candidates);
-  }
+  const contactText = contactNodes
+    .map((node) => node.innerText || node.textContent || "")
+    .join("\n");
 
-  const bodyText =
-    document.body?.innerText ||
-    document.body?.textContent ||
-    document.documentElement?.innerText ||
-    document.documentElement?.textContent ||
-    "";
+  const mailtoEmails = [...document.querySelectorAll('a[href^="mailto:" i]')]
+    .map((node) => {
+      const href = node.getAttribute("href") || "";
+      const raw = href.replace(/^mailto:/i, "").split("?")[0].trim();
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    });
 
-  collectFromText(bodyText, 10, "pagina", candidates);
+  const contactEmails =
+    contactText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
 
-  const metaValues = [...document.querySelectorAll("meta[content]")]
-    .map((node) => node.getAttribute("content") || "");
+  const emails = unique([...mailtoEmails, ...contactEmails])
+    .filter((email) => email.length <= 120)
+    .slice(0, 4);
 
-  for (const value of metaValues) {
-    collectFromText(value, 20, "meta", candidates);
-  }
-
-  if (!candidates.size && document.documentElement?.outerHTML) {
-    collectFromText(document.documentElement.outerHTML, 5, "html", candidates);
-  }
+  const phones = unique(
+    [...document.querySelectorAll('a[href^="tel:" i]')]
+      .map((node) => (node.getAttribute("href") || "").replace(/^tel:/i, "").trim())
+      .map((phone) => phone.replace(/\s+/g, " "))
+  )
+    .filter((phone) => phone.length >= 6 && phone.length <= 40)
+    .slice(0, 4);
 
   const siteName =
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
@@ -137,15 +215,15 @@ export function scanCurrentPage() {
     title: document.title,
     siteName,
     contacts: {
-      emails: extractEmails(bodyText),
-      phones: extractPhones()
+      emails,
+      phones
     },
     candidates: [...candidates.values()]
       .sort((a, b) => b.score - a.score || a.vat.localeCompare(b.vat))
-      .slice(0, 8),
+      .slice(0, 4),
     diagnostics: {
-      bodyTextLength: bodyText.length,
-      footerNodes: footerNodes.length
+      legalNodes: legalNodes.length,
+      contactNodes: contactNodes.length
     }
   };
 }
