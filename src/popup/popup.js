@@ -468,19 +468,8 @@ function renderCompany(
   elements.confidenceStatus.classList.toggle("hidden", !showConfidence);
   elements.confidenceSeparator.classList.toggle("hidden", !showConfidence);
 
-  const locationParts = unique([
-    company?.city,
-    company?.province,
-    company?.region
-  ]);
-
-  elements.location.textContent = locationParts.length
-    ? locationParts.join(" · ")
-    : "";
-
-  if (!elements.location.textContent && address) {
-    elements.location.textContent = address;
-  }
+  // Avoid duplicating city/province/region above the full legal address.
+  elements.location.textContent = "";
 
   elements.sourceStatus.textContent =
     source === "manual"
@@ -518,6 +507,26 @@ function providerNames(viesData) {
   ]);
 }
 
+function providerProvinceHints(viesData) {
+  const hints = [];
+  const address = String(viesData?.address || "").trim();
+
+  const trailing = address.match(/\b([A-Z]{2})$/);
+  if (trailing) hints.push(trailing[1]);
+
+  const parenthesized = address.match(/\(([A-Z]{2})\)\s*$/);
+  if (parenthesized) hints.push(parenthesized[1]);
+
+  const evidence = String(
+    currentScan?.candidates?.[0]?.context || ""
+  );
+
+  const contextProvince = evidence.match(/\(([A-Z]{2})\)/);
+  if (contextProvince) hints.push(contextProvince[1]);
+
+  return unique(hints);
+}
+
 async function lookupVat(
   rawVat,
   {
@@ -547,7 +556,8 @@ async function lookupVat(
   setLoading("Recupero fatturato e dati societari…");
 
   const providerData = await findAziendeCompanyByVat(vat, {
-    names: providerNames(viesData)
+    names: providerNames(viesData),
+    provinceHints: providerProvinceHints(viesData)
   });
 
   const company = normalizeCompany(providerData, viesData, vat);
