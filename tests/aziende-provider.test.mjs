@@ -355,3 +355,10 @@ test("Aziende negative cache stores only durable 404 misses", () => {
   assert.equal(shouldCacheAziendeMiss(500), false);
   assert.equal(shouldCacheAziendeMiss(503), false);
 });
+
+
+test("keeps exact canonical Aziende slug first for normal legal names", () => {
+  const slugs = buildSlugCandidates(["FUTURE TECH SRL"]);
+
+  assert.equal(slugs[0], "future-tech-srl");
+});
