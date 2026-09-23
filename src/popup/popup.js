@@ -32,6 +32,7 @@ const elements = {
   companyBadges: document.querySelector("#company-badges"),
   statusBadge: document.querySelector("#status-badge"),
   ageBadge: document.querySelector("#age-badge"),
+  dataCompletionStatus: document.querySelector("#data-completion-status"),
   vat: document.querySelector("#company-vat"),
   address: document.querySelector("#company-address"),
   addressRow: document.querySelector("#address-row"),
@@ -91,6 +92,9 @@ const elements = {
 let currentScan = null;
 let currentDomainLookup = null;
 let companyIsVisible = false;
+let dataCompletionGeneration = 0;
+let dataCompletionTimer = null;
+const pendingDataPromises = new Set();
 
 function digitsOnly(value) {
   return String(value || "").replace(/\D/g, "");
@@ -151,6 +155,62 @@ function setLoading(message) {
 
 function stopLoading() {
   elements.loadingView.classList.add("hidden");
+}
+
+function resetDataCompletionStatus() {
+  dataCompletionGeneration += 1;
+  pendingDataPromises.clear();
+
+  if (dataCompletionTimer) {
+    clearTimeout(dataCompletionTimer);
+    dataCompletionTimer = null;
+  }
+
+  elements.dataCompletionStatus.classList.add("hidden");
+  return dataCompletionGeneration;
+}
+
+function trackDataCompletion(promise, generation) {
+  if (
+    !promise ||
+    generation !== dataCompletionGeneration ||
+    pendingDataPromises.has(promise)
+  ) {
+    return;
+  }
+
+  pendingDataPromises.add(promise);
+
+  if (!dataCompletionTimer && elements.dataCompletionStatus.classList.contains("hidden")) {
+    dataCompletionTimer = setTimeout(() => {
+      dataCompletionTimer = null;
+
+      if (
+        generation === dataCompletionGeneration &&
+        pendingDataPromises.size > 0 &&
+        companyIsVisible
+      ) {
+        elements.dataCompletionStatus.classList.remove("hidden");
+      }
+    }, 350);
+  }
+
+  const finish = () => {
+    if (generation !== dataCompletionGeneration) return;
+
+    pendingDataPromises.delete(promise);
+
+    if (pendingDataPromises.size === 0) {
+      if (dataCompletionTimer) {
+        clearTimeout(dataCompletionTimer);
+        dataCompletionTimer = null;
+      }
+
+      elements.dataCompletionStatus.classList.add("hidden");
+    }
+  };
+
+  Promise.resolve(promise).then(finish, finish);
 }
 
 function showManual({ allowCancel = companyIsVisible, message } = {}) {
@@ -576,6 +636,7 @@ async function lookupVat(
   } = {}
 ) {
   const vat = digitsOnly(rawVat);
+  const completionGeneration = resetDataCompletionStatus();
 
   if (!isValidItalianVat(vat)) {
     stopLoading();
@@ -658,6 +719,10 @@ async function lookupVat(
     if (!providerResult) return;
 
     if (providerResult.backgroundCanonical) {
+      trackDataCompletion(
+        providerResult.backgroundCanonical,
+        completionGeneration
+      );
       providerResult.backgroundCanonical.then((update) => {
         if (!update || !stillShowingVat()) return;
         renderResolved({
@@ -669,6 +734,10 @@ async function lookupVat(
     }
 
     if (providerResult.backgroundXray) {
+      trackDataCompletion(
+        providerResult.backgroundXray,
+        completionGeneration
+      );
       providerResult.backgroundXray.then((xray) => {
         if (!xray || !stillShowingVat()) return;
         renderResolved({
@@ -679,6 +748,10 @@ async function lookupVat(
     }
 
     if (providerResult.backgroundVerification) {
+      trackDataCompletion(
+        providerResult.backgroundVerification,
+        completionGeneration
+      );
       providerResult.backgroundVerification.then((update) => {
         if (!update?.registro || !stillShowingVat()) return;
 
@@ -694,6 +767,10 @@ async function lookupVat(
   attachProviderUpdates(resolved);
 
   if (resolved.backgroundRefresh) {
+    trackDataCompletion(
+      resolved.backgroundRefresh,
+      completionGeneration
+    );
     resolved.backgroundRefresh.then((fresh) => {
       if (!fresh || !stillShowingVat()) return;
       renderResolved(fresh);
