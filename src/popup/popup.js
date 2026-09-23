@@ -2,6 +2,7 @@ import { checkItalianVatOnVies } from "../providers/vies.js";
 import { findAziendeCompaniesByContext } from "../providers/aziende.js";
 import { findRegistroAziendeCompaniesByContext } from "../providers/registroaziende.js";
 import {
+  mergeProviderResultState,
   previousBalanceRows,
   resolveCompanyProviders
 } from "../providers/orchestrator.js";
@@ -844,7 +845,17 @@ async function lookupVat(
     return true;
   };
 
-  const accepted = renderResolved(resolved);
+  let activeProviderResult = mergeProviderResultState({}, resolved);
+
+  const applyProviderUpdate = (patch) => {
+    activeProviderResult = mergeProviderResultState(
+      activeProviderResult,
+      patch
+    );
+    return renderResolved(activeProviderResult);
+  };
+
+  const accepted = renderResolved(activeProviderResult);
 
   if (!accepted) {
     elements.button.disabled = false;
@@ -864,11 +875,7 @@ async function lookupVat(
       );
       providerResult.backgroundCanonical.then((update) => {
         if (!update || !stillShowingVat()) return;
-        renderResolved({
-          ...providerResult,
-          ...update,
-          primary: update.aziende || update.primary
-        });
+        applyProviderUpdate(update);
       });
     }
 
@@ -879,10 +886,7 @@ async function lookupVat(
       );
       providerResult.backgroundXray.then((xray) => {
         if (!xray || !stillShowingVat()) return;
-        renderResolved({
-          ...providerResult,
-          xray
-        });
+        applyProviderUpdate({ xray });
       });
     }
 
@@ -894,8 +898,7 @@ async function lookupVat(
       providerResult.backgroundVerification.then((update) => {
         if (!update?.registro || !stillShowingVat()) return;
 
-        renderResolved({
-          ...providerResult,
+        applyProviderUpdate({
           registro: update.registro,
           verification: update.verification
         });
@@ -912,7 +915,7 @@ async function lookupVat(
     );
     resolved.backgroundRefresh.then((fresh) => {
       if (!fresh || !stillShowingVat()) return;
-      renderResolved(fresh);
+      applyProviderUpdate(fresh);
       attachProviderUpdates(fresh);
     });
   }

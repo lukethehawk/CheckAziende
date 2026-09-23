@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.1`.
+Versione `0.8.2`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -293,3 +293,18 @@ Il lookup Aziende.it è stato reso più conservativo dopo alcuni casi in cui il 
 - un test protegge l'ordine del caso normale `FUTURE TECH SRL` → `future-tech-srl`.
 
 La P.IVA resta sempre il controllo finale: una pagina Aziende.it viene accettata solo se il VAT trovato coincide con quello richiesto.
+
+
+## Provider async merge 0.8.2
+
+Gli aggiornamenti in background dei provider vengono ora fusi nello stato già visibile invece di partire ogni volta dallo snapshot iniziale.
+
+Questo evita una regressione in cui Aziende.it poteva risolversi correttamente in background e comparire per un istante, ma un successivo aggiornamento Xray/Registro poteva ridisegnare la scheda usando uno stato precedente e rimuoverlo dalle fonti mostrate.
+
+Regole:
+- una fonte già risolta non viene rimossa da un aggiornamento asincrono successivo che non la contiene;
+- Aziende.it resta il provider canonico una volta risolto;
+- RegistroAziende e Xray continuano ad arricchire senza sostituire la fonte canonica;
+- la cache generale dell'orchestratore è stata invalidata a `v8` per non riutilizzare snapshot precedenti incompleti.
+
+Sono presenti test di regressione sulla sequenza Registro → Aziende → Xray e sul mantenimento di Aziende come primary.
