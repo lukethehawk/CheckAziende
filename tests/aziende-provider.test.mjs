@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   buildSlugCandidates,
+  inferCompanyStatus,
   parseAziendeText,
+  parseBalanceHistoryRows,
   slugifyCompanyName
 } from "../src/providers/aziende.js";
 
@@ -283,4 +285,31 @@ Dipendenti
 
   assert.equal(company.financials.employees.value, 118558);
   assert.equal(company.financials.employees.display, "118558");
+});
+
+
+test("finds active status even when DOM text is flattened", () => {
+  const text =
+    "RUBINO - S.R.L.Attiva SOCIETA' A RESPONSABILITA' LIMITATA " +
+    "Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016 " +
+    "P.IVA 05488440651 REA SA-450078 " +
+    "Rubino - S.r.l. è un'impresa attiva o cessata?";
+
+  assert.equal(inferCompanyStatus(text), "Attiva");
+});
+
+test("parses balance history from HTML table cell rows", () => {
+  const history = parseBalanceHistoryRows([
+    ["Anno", "Fatturato", "Δ%", "Utile/Perdita", "Dipendenti", "Capitale"],
+    ["2024", "€ 2.277.793", "+4,2%", "€ 111.548", "14", "€ 80.000"],
+    ["2023", "€ 2.185.586", "-6,1%", "€ 166.983", "—", "—"],
+    ["2022", "€ 2.328.756", "—", "€ 253.552", "14", "€ 80.000"]
+  ]);
+
+  assert.equal(history.length, 3);
+  assert.deepEqual(history.map((item) => item.year), [2024, 2023, 2022]);
+  assert.equal(history[0].revenue, 2277793);
+  assert.equal(history[0].profit, 111548);
+  assert.equal(history[0].employees, 14);
+  assert.equal(history[1].employees, null);
 });
