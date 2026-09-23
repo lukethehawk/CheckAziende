@@ -55,6 +55,39 @@ export function scanCurrentPage() {
     }
   }
 
+  function unique(values) {
+    return [...new Set(values.filter(Boolean))];
+  }
+
+  function extractEmails(bodyText) {
+    const fromLinks = [...document.querySelectorAll('a[href^="mailto:" i]')]
+      .map((node) => {
+        const href = node.getAttribute("href") || "";
+        const raw = href.replace(/^mailto:/i, "").split("?")[0].trim();
+        try {
+          return decodeURIComponent(raw);
+        } catch {
+          return raw;
+        }
+      });
+
+    const fromText = bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+
+    return unique([...fromLinks, ...fromText])
+      .filter((email) => email.length <= 120)
+      .slice(0, 4);
+  }
+
+  function extractPhones() {
+    return unique(
+      [...document.querySelectorAll('a[href^="tel:" i]')]
+        .map((node) => (node.getAttribute("href") || "").replace(/^tel:/i, "").trim())
+        .map((phone) => phone.replace(/\s+/g, " "))
+    )
+      .filter((phone) => phone.length >= 6 && phone.length <= 40)
+      .slice(0, 4);
+  }
+
   const candidates = new Map();
 
   let footerNodes = [];
@@ -92,9 +125,21 @@ export function scanCurrentPage() {
     collectFromText(document.documentElement.outerHTML, 5, "html", candidates);
   }
 
+  const siteName =
+    document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
+    document.title?.trim() ||
+    location.hostname;
+
   return {
     url: location.href,
+    origin: location.origin,
+    hostname: location.hostname,
     title: document.title,
+    siteName,
+    contacts: {
+      emails: extractEmails(bodyText),
+      phones: extractPhones()
+    },
     candidates: [...candidates.values()]
       .sort((a, b) => b.score - a.score || a.vat.localeCompare(b.vat))
       .slice(0, 8),
