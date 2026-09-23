@@ -84,9 +84,45 @@ test("Xray enrichment keeps non-filed provenance", () => {
     }
   });
 
-  assert.equal(company.name, "MPS MONITOR S.R.L.");
+  assert.equal(company.name, "MPS MONITOR SRL");
   assert.equal(company.financials.ebitda.value, 1858000);
   assert.equal(company.financials.revenue.source, "Xray Finance");
   assert.equal(company.financials.revenue.isFiled, false);
   assert.equal(company.financials.balanceHistory[0].isFiled, false);
+});
+
+
+test("Xray SEO-style title does not replace an existing VIES company name", () => {
+  const company = normalizeCompany(null, {
+    vatNumber: "11295150152",
+    name: "FUTURE TECH SRL"
+  }, "11295150152");
+
+  enrichCompanyWithXray(company, {
+    provider: "Xray Finance",
+    name: "FUTURE TECH SRL - Fatturato, Bilancio 2025 e dati finanziari",
+    financials: {
+      year: 2024,
+      revenue: 1992222,
+      ebitda: 318000,
+      ebitdaMargin: 16
+    }
+  });
+
+  assert.equal(company.name, "FUTURE TECH SRL");
+});
+
+test("Xray can still provide a name when no other source has one", () => {
+  const company = normalizeCompany(null, null, "11295150152");
+
+  enrichCompanyWithXray(company, {
+    provider: "Xray Finance",
+    name: "FUTURE TECH SRL",
+    financials: {
+      year: 2024,
+      revenue: 1992222
+    }
+  });
+
+  assert.equal(company.name, "FUTURE TECH SRL");
 });
