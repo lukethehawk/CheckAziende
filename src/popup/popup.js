@@ -1,4 +1,5 @@
 import { checkItalianVatOnVies, viesUrl } from "../providers/vies.js";
+import { scanCurrentPage } from "../scanner.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -132,15 +133,23 @@ async function inspectActivePage() {
   try {
     const injection = await api.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ["src/content.js"]
+      func: scanCurrentPage
     });
 
-    const scan = injection?.[0]?.result;
+    const mainFrame = injection?.find((item) => item.frameId === 0) || injection?.[0];
+
+    if (mainFrame?.error) {
+      throw new Error(mainFrame.error?.message || String(mainFrame.error));
+    }
+
+    const scan = mainFrame?.result;
     const candidates = scan?.candidates || [];
 
     if (!candidates.length) {
       setStatus("Nessuna Partita IVA valida trovata automaticamente.");
-      elements.detectionNote.textContent = "Puoi inserirla manualmente.";
+      elements.detectionNote.textContent = scan?.diagnostics
+        ? `Pagina letta correttamente (${scan.diagnostics.bodyTextLength} caratteri), ma nessuna P.IVA riconosciuta.`
+        : "Puoi inserirla manualmente.";
       return;
     }
 
