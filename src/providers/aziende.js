@@ -674,6 +674,10 @@ async function writeCache(key, value) {
   }
 }
 
+export function shouldCacheAziendeMiss(status) {
+  return Number(status) === 404;
+}
+
 async function fetchCompanySlug(slug) {
   const key = `aziende:v6:slug:${slug}`;
   const cached = await readCache(key);
@@ -694,7 +698,7 @@ async function fetchCompanySlug(slug) {
     if (!response.ok) {
       // Only a real 404 is a durable miss. Rate limits, server errors and
       // anti-bot responses must not poison the provider cache for 12 hours.
-      if (response.status === 404) {
+      if (shouldCacheAziendeMiss(response.status)) {
         await writeCache(key, null);
       }
       return null;
