@@ -42,7 +42,10 @@ export function enrichCompanyWithXray(company, xray) {
 
   const hadPrimaryProvider = Boolean(company.providers?.length);
 
-  if (!hadPrimaryProvider && xray.name) {
+  // Xray is an enrichment source. Its H1 can contain SEO text such as
+  // "Company - Fatturato, Bilancio..." and must not temporarily replace a
+  // company name already obtained from VIES or a registry provider.
+  if (!company.name && !hadPrimaryProvider && xray.name) {
     company.name = xray.name;
   }
 
