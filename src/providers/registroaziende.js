@@ -118,7 +118,9 @@ function parseHistoryFromLines(lines) {
     history.push({
       year: Number(year),
       revenue: money[0] ?? null,
-      profit: money[1] ?? null
+      profit: money[1] ?? null,
+      source: "RegistroAziende.it",
+      isFiled: true
     });
   }
 
@@ -145,7 +147,13 @@ function parseHistoryFromInlineText(text) {
 
     if (!Number.isFinite(revenue) || !Number.isFinite(profit)) continue;
 
-    history.push({ year, revenue, profit });
+    history.push({
+      year,
+      revenue,
+      profit,
+      source: "RegistroAziende.it",
+      isFiled: true
+    });
   }
 
   const byYear = new Map();
@@ -279,7 +287,9 @@ function parseHistoryFromDocument(doc) {
       history.push({
         year: Number(year),
         revenue: Number.isFinite(revenue) ? revenue : null,
-        profit: Number.isFinite(profit) ? profit : null
+        profit: Number.isFinite(profit) ? profit : null,
+        source: "RegistroAziende.it",
+        isFiled: true
       });
     }
 
@@ -291,6 +301,52 @@ function parseHistoryFromDocument(doc) {
   return [];
 }
 
+function mergeHistoryRows(primary, fallback) {
+  const byYear = new Map();
+
+  const mergeOne = (item, preferExisting = false) => {
+    const year = Number(item?.year);
+    if (!Number.isFinite(year)) return;
+
+    const previous = byYear.get(year);
+    if (!previous) {
+      byYear.set(year, { ...item, year });
+      return;
+    }
+
+    const preferred = preferExisting ? previous : item;
+    const secondary = preferExisting ? item : previous;
+    const sources = [...new Set([
+      ...(Array.isArray(previous.sources) ? previous.sources : []),
+      previous.source,
+      ...(Array.isArray(item.sources) ? item.sources : []),
+      item.source
+    ].filter(Boolean))];
+
+    byYear.set(year, {
+      ...secondary,
+      ...Object.fromEntries(
+        Object.entries(preferred).filter(([, value]) => value !== null && value !== undefined)
+      ),
+      year,
+      sources,
+      source: preferred.source || secondary.source || null,
+      isFiled: Boolean(previous.isFiled || item.isFiled)
+    });
+  };
+
+  for (const item of Array.isArray(primary) ? primary : []) {
+    mergeOne(item, false);
+  }
+  for (const item of Array.isArray(fallback) ? fallback : []) {
+    mergeOne(item, true);
+  }
+
+  return [...byYear.values()]
+    .sort((a, b) => b.year - a.year)
+    .slice(0, 3);
+}
+
 export function parseRegistroAziendePage(html, url) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const text = doc.body?.innerText || doc.body?.textContent || "";
@@ -300,9 +356,12 @@ export function parseRegistroAziendePage(html, url) {
 
   const domHistory = parseHistoryFromDocument(doc);
   if (domHistory.length) {
-    company.financials.balanceHistory = domHistory;
+    company.financials.balanceHistory = mergeHistoryRows(
+      company.financials.balanceHistory,
+      domHistory
+    );
 
-    const latest = domHistory[0];
+    const latest = company.financials.balanceHistory[0];
     if (!Number.isFinite(company.financials.revenue?.value) &&
         Number.isFinite(latest.revenue)) {
       company.financials.revenue = {
@@ -348,7 +407,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchSlug(slug) {
-  const key = `registro:v2:${slug}`;
+  const key = `registro:v3:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
