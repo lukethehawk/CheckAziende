@@ -12,7 +12,7 @@ const VAT_SOURCE_SCORES = Object.freeze({
   vat_privacy: 96,
   vat_related_legal: 96,
   vat_contact: 94,
-  vat_company_page: 93,
+  vat_company_page: 55,
   vat_footer_text: 92,
   vat_other_labeled: 90
 });

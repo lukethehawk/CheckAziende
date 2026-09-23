@@ -140,23 +140,19 @@ export function scanCurrentPage() {
   }
 
   function discoverRelatedUrls() {
-    const keywords = [
-      "privacy",
-      "privacy-policy",
-      "legal",
-      "legal-notices",
-      "note-legali",
-      "contatti",
-      "contact",
-      "contacts",
-      "chi-siamo",
-      "about",
-      "azienda",
-      "company",
-      "corporate",
-      "terms",
-      "termini",
-      "impressum"
+    const strongPatterns = [
+      /privacy/i,
+      /privacy-policy/i,
+      /legal/i,
+      /legal-notices/i,
+      /note-legali/i,
+      /contatti/i,
+      /contact(?:s)?/i,
+      /chi-siamo/i,
+      /about(?:-us)?/i,
+      /terms/i,
+      /termini/i,
+      /impressum/i
     ];
 
     const scored = [];
@@ -176,16 +172,34 @@ export function scanCurrentPage() {
       if (!["http:", "https:"].includes(url.protocol)) continue;
 
       url.hash = "";
-      const haystack = `${url.pathname} ${anchor.textContent || ""}`.toLowerCase();
+
+      const path = url.pathname.toLowerCase();
+      const anchorText = clean(anchor.textContent || "", 120).toLowerCase();
+      const haystack = `${path} ${anchorText}`;
 
       let score = 0;
-      for (const keyword of keywords) {
-        if (haystack.includes(keyword)) score += 10;
+
+      for (const pattern of strongPatterns) {
+        if (pattern.test(haystack)) score += 20;
       }
 
-      if (/privacy|legal|note-legali|impressum/.test(haystack)) score += 25;
-      if (/contatti|contact/.test(haystack)) score += 20;
-      if (/chi-siamo|about|azienda|company|corporate/.test(haystack)) score += 10;
+      if (/privacy|legal|note-legali|impressum/.test(haystack)) score += 30;
+      if (/contatti|contact/.test(haystack)) score += 25;
+      if (/chi-siamo|about(?:-us)?/.test(haystack)) score += 20;
+
+      // Generic "azienda/company/corporate" pages are useful on a normal
+      // corporate site, but dangerous on directories and data providers.
+      // Accept them only when both path and anchor are clearly the site's own
+      // corporate page, not when the word merely appears inside a longer URL
+      // such as /confronto-aziende or /elenco-aziende.
+      const pathSegments = path.split("/").filter(Boolean);
+      const lastSegment = pathSegments.at(-1) || "";
+      const exactCorporatePath = /^(?:azienda|company|corporate)$/.test(lastSegment);
+      const exactCorporateAnchor = /^(?:azienda|company|corporate)$/.test(anchorText);
+
+      if (exactCorporatePath && exactCorporateAnchor) {
+        score += 12;
+      }
 
       if (score > 0) scored.push({ url: url.href, score });
     }
@@ -222,12 +236,34 @@ export function scanCurrentPage() {
     legalNodes = [...document.querySelectorAll("footer, address")];
   }
 
+  const pageContextText = [
+    location.pathname,
+    location.search,
+    document.title || "",
+    document.querySelector("h1")?.textContent || ""
+  ].join(" ").toLowerCase();
+
+  const looksLikeSearchOrDirectoryPage =
+    /(?:\bsearch\b|\bricerca\b|\bricerca-avanzata\b|\brisultat[io]\b|\belenco\b|\bdirectory\b|\baziende\b|\bcompanies\b)/i
+      .test(pageContextText);
+
   const candidates = new Map();
   extractStructuredCandidates(candidates);
 
   for (const node of legalNodes) {
     const text = node.innerText || node.textContent || "";
     collectLabeledVat(text, "footer/area legale", candidates, 120);
+  }
+
+  // Search/directory pages can legitimately show VAT numbers for third-party
+  // companies. On those pages keep only owner-level evidence from legal/footer
+  // or structured metadata, and never infer the site owner from page content.
+  if (looksLikeSearchOrDirectoryPage) {
+    for (const [vat, candidate] of [...candidates.entries()]) {
+      if (!["vat_structured", "vat_metadata", "vat_legal"].includes(candidate.evidenceType)) {
+        candidates.delete(vat);
+      }
+    }
   }
 
   for (const node of document.querySelectorAll("meta[content]")) {
@@ -341,7 +377,8 @@ export function scanCurrentPage() {
       .slice(0, 4),
     diagnostics: {
       legalNodes: legalNodes.length,
-      contactNodes: contactNodes.length
+      contactNodes: contactNodes.length,
+      looksLikeSearchOrDirectoryPage
     }
   };
 }
@@ -396,9 +433,13 @@ export async function scanRelatedPages(urls) {
       return "note legali";
     }
     if (path.includes("contact") || path.includes("contatti")) return "pagina contatti";
-    if (path.includes("about") || path.includes("chi-siamo") || path.includes("company") || path.includes("azienda")) {
+    if (path.includes("about") || path.includes("chi-siamo")) return "pagina azienda";
+
+    const lastSegment = path.split("/").filter(Boolean).at(-1) || "";
+    if (/^(?:azienda|company|corporate)$/.test(lastSegment)) {
       return "pagina azienda";
     }
+
     if (path.includes("terms") || path.includes("termini")) return "termini del sito";
     return title || "pagina societaria";
   }
@@ -436,6 +477,8 @@ export async function scanRelatedPages(urls) {
       const label = sourceLabel(response.url || url.href, doc.title?.trim());
       checkedUrls.push(response.url || url.href);
 
+      const pageCandidates = [];
+
       VAT_NUMBER_PATTERN.lastIndex = 0;
       let match;
       while ((match = VAT_NUMBER_PATTERN.exec(text)) !== null) {
@@ -458,15 +501,22 @@ export async function scanRelatedPages(urls) {
                 ? "vat_company_page"
                 : "vat_other_labeled";
 
-        candidates.push({
+        pageCandidates.push({
           vat,
-          score: 130,
+          score: label === "pagina azienda" ? 80 : 130,
           source: label,
           evidenceType,
-          confidence: "high",
+          confidence: label === "pagina azienda" ? "medium" : "high",
           context,
           url: response.url || url.href
         });
+      }
+
+      // A company directory/listing can contain many valid VAT numbers.
+      // Such a page describes third parties and must never identify the site owner.
+      const distinctPageVats = new Set(pageCandidates.map((item) => item.vat));
+      if (distinctPageVats.size === 1) {
+        candidates.push(...pageCandidates);
       }
 
       for (const anchor of doc.querySelectorAll('a[href^="mailto:" i]')) {
