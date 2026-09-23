@@ -1,9 +1,6 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
-import {
-  findAziendeCompanyByVat,
-  findAziendeCompaniesByContext
-} from "../providers/aziende.js";
-import { findXrayCompanyByVat } from "../providers/xray.js";
+import { findAziendeCompaniesByContext } from "../providers/aziende.js";
+import { resolveCompanyProviders } from "../providers/orchestrator.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
 import { buildDomainLookupContext, uniqueBrandHints } from "../domain.js";
 import {
@@ -374,6 +371,73 @@ function enrichCompanyWithXray(company, xray) {
   return company;
 }
 
+function enrichCompanyWithFallback(company, fallback) {
+  if (!fallback) return company;
+
+  for (const key of [
+    "status",
+    "address",
+    "legalForm",
+    "taxCode",
+    "rea",
+    "pec",
+    "sdi",
+    "registrationDate",
+    "chamber",
+    "city",
+    "province",
+    "region"
+  ]) {
+    if (!company[key] && fallback[key]) company[key] = fallback[key];
+  }
+
+  if ((!company.ateco?.code && !company.ateco?.description) && fallback.ateco) {
+    company.ateco = fallback.ateco;
+  }
+
+  const financials = company.financials || {};
+  const fallbackFinancials = fallback.financials || {};
+
+  for (const key of ["revenue", "profit", "employees"]) {
+    if (!financials[key] && fallbackFinancials[key]) {
+      financials[key] = fallbackFinancials[key];
+    }
+  }
+
+  if (
+    (!Array.isArray(financials.balanceHistory) || financials.balanceHistory.length < 2) &&
+    Array.isArray(fallbackFinancials.balanceHistory) &&
+    fallbackFinancials.balanceHistory.length
+  ) {
+    financials.balanceHistory = fallbackFinancials.balanceHistory;
+  }
+
+  if (!Number.isFinite(financials.netMargin) &&
+      Number.isFinite(financials.profit?.value) &&
+      Number.isFinite(financials.revenue?.value) &&
+      financials.revenue.value !== 0) {
+    financials.netMargin =
+      (financials.profit.value / financials.revenue.value) * 100;
+  }
+
+  if (!Number.isFinite(financials.revenuePerEmployee) &&
+      Number.isFinite(financials.revenue?.value) &&
+      Number.isFinite(financials.employees?.value) &&
+      financials.employees.value > 0) {
+    financials.revenuePerEmployee =
+      financials.revenue.value / financials.employees.value;
+  }
+
+  company.financials = financials;
+  company.providers = unique([
+    ...(company.providers || []),
+    fallback.provider
+  ]);
+  company.provider = company.providers.join(" · ");
+
+  return company;
+}
+
 function fallbackCompanyName(company, source) {
   if (company?.name) return company.name;
 
@@ -601,6 +665,18 @@ function providerNames(viesData) {
   ]);
 }
 
+function providerCityHints(viesData) {
+  const address = String(viesData?.address || "").trim();
+  const hints = [];
+
+  const postalCity = address.match(
+    /\b\d{5}\s+([A-ZÀ-ÖØ-Ý' .-]+?)(?:\s+[A-Z]{2})?$/
+  );
+  if (postalCity?.[1]) hints.push(postalCity[1].trim());
+
+  return unique(hints);
+}
+
 function providerProvinceHints(viesData, candidate = null) {
   const hints = [];
   const address = String(viesData?.address || "").trim();
@@ -647,54 +723,97 @@ async function lookupVat(
 
   const viesData = await getViesData(vat, bypassCache);
 
-  setLoading("Recupero fatturato e dati societari…");
+  setLoading("Recupero dati societari e finanziari…");
 
-  const providerData = await findAziendeCompanyByVat(vat, {
-    names: providerNames(viesData),
-    provinceHints: providerProvinceHints(viesData, candidate)
+  const names = providerNames(viesData);
+  const resolved = await resolveCompanyProviders({
+    vat,
+    names,
+    provinceHints: providerProvinceHints(viesData, candidate),
+    cityHints: providerCityHints(viesData)
   });
 
-  const company = normalizeCompany(providerData, viesData, vat);
+  const renderResolved = (providerResult) => {
+    const company = normalizeCompany(
+      providerResult?.primary,
+      viesData,
+      vat
+    );
 
-  setLoading("Recupero EBITDA e indicatori finanziari…");
+    if (providerResult?.registro && providerResult.primary !== providerResult.registro) {
+      enrichCompanyWithFallback(company, providerResult.registro);
+    }
 
-  const xrayData = await findXrayCompanyByVat(vat, {
-    names: unique([
-      company.name,
-      ...providerNames(viesData)
-    ])
-  });
+    enrichCompanyWithXray(company, providerResult?.xray);
+    company.verification = providerResult?.verification || null;
+    company.evaluation = evaluateFinancialProfile(company);
 
-  enrichCompanyWithXray(company, xrayData);
-  company.evaluation = evaluateFinancialProfile(company);
+    const assessment = assessVatMatch({
+      candidate,
+      company: {
+        name: company.name || "",
+        vat: company.vat || vat
+      },
+      pageContext: getPageContext(),
+      manual: source === "manual"
+    });
 
-  const assessment = assessVatMatch({
-    candidate,
-    company: {
-      name: company.name || "",
-      vat: company.vat || vat
-    },
-    pageContext: getPageContext(),
-    manual: source === "manual"
-  });
+    if (source === "automatic" && assessment.status === "unidentified") {
+      return false;
+    }
 
-  // A weak VAT found only on a generic "company/azienda" page must also
-  // agree with the current site's domain/brand. Otherwise it is very likely
-  // a third-party company shown by a directory, marketplace or data provider.
-  if (source === "automatic" && assessment.status === "unidentified") {
+    renderCompany(company, {
+      source,
+      evidenceLabel:
+        evidenceLabel ||
+        (source === "manual"
+          ? "P.IVA inserita manualmente"
+          : "P.IVA identificata dal sito"),
+      assessment
+    });
+
+    return true;
+  };
+
+  const accepted = renderResolved(resolved);
+
+  if (!accepted) {
     elements.button.disabled = false;
     return false;
   }
 
-  renderCompany(company, {
-    source,
-    evidenceLabel:
-      evidenceLabel ||
-      (source === "manual"
-        ? "P.IVA inserita manualmente"
-        : "P.IVA identificata dal sito"),
-    assessment
-  });
+  const stillShowingVat = () =>
+    companyIsVisible && digitsOnly(elements.vat.textContent) === vat;
+
+  if (resolved.backgroundVerification) {
+    resolved.backgroundVerification.then((update) => {
+      if (!update?.registro || !stillShowingVat()) return;
+
+      renderResolved({
+        ...resolved,
+        registro: update.registro,
+        verification: update.verification
+      });
+    });
+  }
+
+  if (resolved.backgroundRefresh) {
+    resolved.backgroundRefresh.then((fresh) => {
+      if (!fresh || !stillShowingVat()) return;
+      renderResolved(fresh);
+
+      if (fresh.backgroundVerification) {
+        fresh.backgroundVerification.then((update) => {
+          if (!update?.registro || !stillShowingVat()) return;
+          renderResolved({
+            ...fresh,
+            registro: update.registro,
+            verification: update.verification
+          });
+        });
+      }
+    });
+  }
 
   hideManual();
   elements.button.disabled = false;
@@ -763,16 +882,24 @@ async function lookupCompanyFromDomain() {
   const best = assessed[0];
   if (!best) return false;
 
-  const company = normalizeCompany(best.company, null, best.company.vat);
-
-  setLoading("Recupero EBITDA e indicatori finanziari…");
-  const xrayData = await findXrayCompanyByVat(company.vat, {
-    names: unique([
-      company.name,
-      ...names
-    ])
+  const resolved = await resolveCompanyProviders({
+    vat: best.company.vat,
+    names: unique([best.company.name, ...names]),
+    cityHints: [best.company.city].filter(Boolean)
   });
-  enrichCompanyWithXray(company, xrayData);
+
+  const company = normalizeCompany(
+    resolved.primary || best.company,
+    null,
+    best.company.vat
+  );
+
+  if (resolved.registro && resolved.primary !== resolved.registro) {
+    enrichCompanyWithFallback(company, resolved.registro);
+  }
+
+  enrichCompanyWithXray(company, resolved.xray);
+  company.verification = resolved.verification || null;
   company.evaluation = evaluateFinancialProfile(company);
 
   renderCompany(company, {
