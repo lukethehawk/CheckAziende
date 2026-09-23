@@ -236,12 +236,34 @@ export function scanCurrentPage() {
     legalNodes = [...document.querySelectorAll("footer, address")];
   }
 
+  const pageContextText = [
+    location.pathname,
+    location.search,
+    document.title || "",
+    document.querySelector("h1")?.textContent || ""
+  ].join(" ").toLowerCase();
+
+  const looksLikeSearchOrDirectoryPage =
+    /(?:\bsearch\b|\bricerca\b|\bricerca-avanzata\b|\brisultat[io]\b|\belenco\b|\bdirectory\b|\baziende\b|\bcompanies\b)/i
+      .test(pageContextText);
+
   const candidates = new Map();
   extractStructuredCandidates(candidates);
 
   for (const node of legalNodes) {
     const text = node.innerText || node.textContent || "";
     collectLabeledVat(text, "footer/area legale", candidates, 120);
+  }
+
+  // Search/directory pages can legitimately show VAT numbers for third-party
+  // companies. On those pages keep only owner-level evidence from legal/footer
+  // or structured metadata, and never infer the site owner from page content.
+  if (looksLikeSearchOrDirectoryPage) {
+    for (const [vat, candidate] of [...candidates.entries()]) {
+      if (!["vat_structured", "vat_metadata", "vat_legal"].includes(candidate.evidenceType)) {
+        candidates.delete(vat);
+      }
+    }
   }
 
   for (const node of document.querySelectorAll("meta[content]")) {
@@ -355,7 +377,8 @@ export function scanCurrentPage() {
       .slice(0, 4),
     diagnostics: {
       legalNodes: legalNodes.length,
-      contactNodes: contactNodes.length
+      contactNodes: contactNodes.length,
+      looksLikeSearchOrDirectoryPage
     }
   };
 }
