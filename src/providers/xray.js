@@ -386,7 +386,7 @@ async function findXrayCompanyViaPublicSearch(vat) {
 }
 
 async function fetchSlug(slug) {
-  const key = `xray:v2:slug:${slug}`;
+  const key = `xray:v3:slug:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
