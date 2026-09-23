@@ -601,7 +601,7 @@ function providerNames(viesData) {
   ]);
 }
 
-function providerProvinceHints(viesData) {
+function providerProvinceHints(viesData, candidate = null) {
   const hints = [];
   const address = String(viesData?.address || "").trim();
 
@@ -612,7 +612,7 @@ function providerProvinceHints(viesData) {
   if (parenthesized) hints.push(parenthesized[1]);
 
   const evidence = String(
-    currentScan?.candidates?.[0]?.context || ""
+    candidate?.context || ""
   );
 
   const contextProvince = evidence.match(/\(([A-Z]{2})\)/);
@@ -651,7 +651,7 @@ async function lookupVat(
 
   const providerData = await findAziendeCompanyByVat(vat, {
     names: providerNames(viesData),
-    provinceHints: providerProvinceHints(viesData)
+    provinceHints: providerProvinceHints(viesData, candidate)
   });
 
   const company = normalizeCompany(providerData, viesData, vat);
@@ -845,24 +845,51 @@ async function inspectActivePage() {
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
     let candidates = currentScan?.candidates || [];
+    let relatedCandidates = [];
 
     if (!candidates.length) {
       const related = await scanFallbackPages(tab.id);
-      candidates = related?.candidates || [];
+      relatedCandidates = related?.candidates || [];
+      candidates = relatedCandidates;
     }
 
     if (candidates.length) {
-      const best = candidates[0];
+      for (const candidate of candidates) {
+        const accepted = await lookupVat(candidate.vat, {
+          source: "automatic",
+          evidenceLabel: candidate.source
+            ? `P.IVA identificata da ${candidate.source}`
+            : "P.IVA identificata dal sito",
+          candidate
+        });
 
-      const accepted = await lookupVat(best.vat, {
-        source: "automatic",
-        evidenceLabel: best.source
-          ? `P.IVA identificata da ${best.source}`
-          : "P.IVA identificata dal sito",
-        candidate: best
-      });
+        if (accepted) return;
+      }
+    }
 
-      if (accepted) return;
+    // If current-page candidates were third-party entities, still check the
+    // site's own Privacy/Legal/Contact pages before falling back to domain/name.
+    if (currentScan?.relatedUrls?.length) {
+      if (!relatedCandidates.length) {
+        const related = await scanFallbackPages(tab.id);
+        relatedCandidates = related?.candidates || [];
+      }
+
+      const alreadyTried = new Set(candidates.map((item) => item.vat));
+
+      for (const candidate of relatedCandidates) {
+        if (alreadyTried.has(candidate.vat)) continue;
+
+        const accepted = await lookupVat(candidate.vat, {
+          source: "automatic",
+          evidenceLabel: candidate.source
+            ? `P.IVA identificata da ${candidate.source}`
+            : "P.IVA identificata da pagina societaria",
+          candidate
+        });
+
+        if (accepted) return;
+      }
     }
 
     const domainMatchFound = await lookupCompanyFromDomain();

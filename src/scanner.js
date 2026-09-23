@@ -218,22 +218,19 @@ export function scanCurrentPage() {
 
   const legalSelector = [
     "footer",
-    "address",
     "[class*='footer' i]",
     "[id*='footer' i]",
     "[class*='legal' i]",
     "[id*='legal' i]",
     "[class*='copyright' i]",
-    "[id*='copyright' i]",
-    "[class*='company-info' i]",
-    "[id*='company-info' i]"
+    "[id*='copyright' i]"
   ].join(", ");
 
   let legalNodes = [];
   try {
     legalNodes = [...document.querySelectorAll(legalSelector)];
   } catch {
-    legalNodes = [...document.querySelectorAll("footer, address")];
+    legalNodes = [...document.querySelectorAll("footer")];
   }
 
   const pageContextText = [
@@ -346,17 +343,25 @@ export function scanCurrentPage() {
     .filter((phone) => phone.length >= 6 && phone.length <= 40)
     .slice(0, 4);
 
+  const applicationName =
+    document.querySelector('meta[name="application-name"]')?.getAttribute("content")?.trim();
+
   const siteName =
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
-    document.title?.trim() ||
+    applicationName ||
     location.hostname;
 
+  // H1 and document.title describe the current page and can name a third-party
+  // company on directories. Keep brand hints limited to site-level signals.
   const brandHints = unique([
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim(),
-    document.querySelector('meta[name="application-name"]')?.getAttribute("content")?.trim(),
-    document.querySelector("h1")?.textContent?.trim(),
+    applicationName,
     ...[...document.querySelectorAll('img[alt]')]
-      .filter((node) => /logo|brand/i.test(node.className || "") || /logo|brand/i.test(node.id || ""))
+      .filter((node) =>
+        /logo|brand/i.test(node.className || "") ||
+        /logo|brand/i.test(node.id || "") ||
+        /logo|brand/i.test(node.getAttribute("src") || "")
+      )
       .map((node) => node.getAttribute("alt")?.trim())
   ]).slice(0, 8);
 

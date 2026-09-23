@@ -5,7 +5,8 @@ import {
   compactIdentity,
   getDomainProfile,
   getRegistrableDomain,
-  normalizeCompanyName
+  normalizeCompanyName,
+  buildDomainLookupContext
 } from "../src/domain.js";
 
 import {
@@ -140,4 +141,59 @@ test("generic company-page VAT can remain a possible match when brand and domain
   assert.equal(assessment.status, "possible");
   assert.ok(assessment.score >= 65);
   assert.ok(assessment.score < 90);
+});
+
+
+test("structured VAT for a third-party profile is not treated as site ownership", () => {
+  const assessment = assessVatMatch({
+    candidate: {
+      vat: "11295150152",
+      source: "dati strutturati",
+      evidenceType: "vat_structured"
+    },
+    company: {
+      name: "FUTURE TECH SRL"
+    },
+    pageContext: {
+      hostname: "www.aziende.it",
+      title: "Future Tech Srl: fatturato 2024",
+      brandHints: ["Aziende.it"]
+    }
+  });
+
+  assert.equal(assessment.status, "unidentified");
+  assert.ok(assessment.score < 65);
+});
+
+test("legal footer VAT remains strong even when legal owner name differs from domain brand", () => {
+  const assessment = assessVatMatch({
+    candidate: {
+      vat: "02357550066",
+      source: "footer/area legale",
+      evidenceType: "vat_legal"
+    },
+    company: {
+      name: "AD INTEND S.R.L."
+    },
+    pageContext: {
+      hostname: "www.aziende.it",
+      title: "Future Tech Srl: fatturato 2024",
+      brandHints: ["Aziende.it"]
+    }
+  });
+
+  assert.equal(assessment.status, "identified");
+  assert.ok(assessment.score >= 90);
+});
+
+test("domain lookup context does not promote page title to site brand", () => {
+  const context = buildDomainLookupContext({
+    hostname: "www.aziende.it",
+    title: "FUTURE TECH SRL",
+    siteName: "Aziende.it",
+    brandHints: ["Aziende.it"]
+  });
+
+  assert.ok(context.searchNames.includes("aziende it") || context.searchNames.includes("aziende"));
+  assert.ok(!context.searchNames.includes("future tech"));
 });
