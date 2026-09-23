@@ -77,7 +77,12 @@ I test coprono anche:
 - normalizzazione delle forme societarie;
 - match P.IVA forte;
 - match dominio/nome che deve restare **Possibile corrispondenza**;
-- mapping dominio-società confermato che può diventare **Identificata**.
+- mapping dominio-società confermato che può diventare **Identificata**;
+- fixture HTML ridotte e ricostruite dei casi reali Future Tech, Rubino, MPS Monitor, Xray e Creditsafe;
+- regressioni cross-provider, ad esempio Rubino che deve mantenere l'arricchimento Xray e Future Tech che deve promuovere il bilancio più recente di RegistroAziende;
+- sicurezza sulle directory: una società descritta in una pagina Xray non deve diventare automaticamente il proprietario del dominio.
+
+Le fixture sono in `tests/fixtures/` e contengono solo la struttura e i campi necessari ai test, non copie integrali delle pagine pubbliche.
 
 ## Struttura
 
