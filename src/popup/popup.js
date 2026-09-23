@@ -1,5 +1,7 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
+import { getDomainProfile, uniqueBrandHints } from "../domain.js";
+import { assessVatMatch, confidenceLabel } from "../confidence.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -23,6 +25,8 @@ const elements = {
   phone: document.querySelector("#company-phone"),
   copyPhone: document.querySelector("#copy-phone"),
   sourceStatus: document.querySelector("#source-status"),
+  confidenceStatus: document.querySelector("#confidence-status"),
+  confidenceSeparator: document.querySelector("#confidence-separator"),
   showManual: document.querySelector("#show-manual"),
   manualPanel: document.querySelector("#manual-panel"),
   manualDescription: document.querySelector("#manual-description"),
@@ -45,6 +49,7 @@ const elements = {
 };
 
 let currentScan = null;
+let currentDomainProfile = null;
 let companyIsVisible = false;
 
 function digitsOnly(value) {
@@ -185,7 +190,10 @@ function showUnidentified(message) {
   showManual({ allowCancel: false });
 }
 
-function renderCompany(viesData, { source = "automatic", evidenceLabel = "" } = {}) {
+function renderCompany(
+  viesData,
+  { source = "automatic", evidenceLabel = "", assessment = null } = {}
+) {
   const vat = viesData?.vatNumber || digitsOnly(elements.input.value);
   const name = fallbackCompanyName(viesData);
   const address = viesData?.address || "";
@@ -196,8 +204,17 @@ function renderCompany(viesData, { source = "automatic", evidenceLabel = "" } = 
   elements.address.textContent = address || "Non disponibile";
   elements.addressRow.classList.toggle("hidden", !address);
 
-  elements.identityBadge.textContent = source === "automatic" ? "Identificata" : "Ricerca manuale";
-  elements.identityBadge.classList.toggle("unverified", source !== "automatic");
+  const status = assessment?.status || (source === "manual" ? "manual" : "identified");
+  elements.identityBadge.textContent = confidenceLabel(status);
+  elements.identityBadge.classList.toggle("unverified", status === "manual");
+  elements.identityBadge.classList.toggle("possible", status === "possible");
+
+  const showConfidence = source === "automatic" && Number.isFinite(assessment?.score);
+  elements.confidenceStatus.textContent = showConfidence
+    ? `Confidenza ${assessment.score}%`
+    : "";
+  elements.confidenceStatus.classList.toggle("hidden", !showConfidence);
+  elements.confidenceSeparator.classList.toggle("hidden", !showConfidence);
 
   const cityHint = address
     ? address.split(/\s{2,}|\n/).filter(Boolean).pop()
@@ -221,7 +238,7 @@ function renderCompany(viesData, { source = "automatic", evidenceLabel = "" } = 
 
 async function lookupVat(
   rawVat,
-  { source = "manual", bypassCache = false, evidenceLabel = "" } = {}
+  { source = "manual", bypassCache = false, evidenceLabel = "", candidate = null } = {}
 ) {
   const vat = digitsOnly(rawVat);
 
@@ -240,17 +257,50 @@ async function lookupVat(
 
   try {
     const viesData = await checkItalianVatOnVies(vat, { bypassCache });
-    renderCompany(viesData, { source, evidenceLabel });
+    const pageContext = {
+      hostname: currentScan?.hostname || "",
+      title: currentScan?.title || "",
+      brandHints: uniqueBrandHints([
+        ...(currentScan?.brandHints || []),
+        currentScan?.siteName
+      ])
+    };
+    const assessment = assessVatMatch({
+      candidate,
+      company: {
+        name: viesData?.name || "",
+        vat: viesData?.vatNumber || vat
+      },
+      pageContext,
+      manual: source === "manual"
+    });
+
+    renderCompany(viesData, { source, evidenceLabel, assessment });
     hideManual();
   } catch {
-    renderCompany(
-      {
-        vatNumber: vat,
-        valid: false,
-        name: null,
-        address: null
+    const fallbackData = {
+      vatNumber: vat,
+      valid: false,
+      name: null,
+      address: null
+    };
+    const assessment = assessVatMatch({
+      candidate,
+      company: fallbackData,
+      pageContext: {
+        hostname: currentScan?.hostname || "",
+        title: currentScan?.title || "",
+        brandHints: uniqueBrandHints([
+          ...(currentScan?.brandHints || []),
+          currentScan?.siteName
+        ])
       },
-      { source, evidenceLabel }
+      manual: source === "manual"
+    });
+
+    renderCompany(
+      fallbackData,
+      { source, evidenceLabel, assessment }
     );
     hideManual();
   } finally {
@@ -324,6 +374,8 @@ async function inspectActivePage() {
     }
 
     currentScan = mainFrame?.result || null;
+    currentDomainProfile = getDomainProfile(currentScan?.hostname || "");
+    if (currentScan) currentScan.domainProfile = currentDomainProfile;
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
     let candidates = currentScan?.candidates || [];
@@ -343,7 +395,8 @@ async function inspectActivePage() {
     const best = candidates[0];
     await lookupVat(best.vat, {
       source: "automatic",
-      evidenceLabel: best.source || "pagina societaria"
+      evidenceLabel: best.source || "pagina societaria",
+      candidate: best
     });
   } catch {
     showUnidentified(
