@@ -132,6 +132,32 @@ function parseHistoryFromLines(lines) {
     .slice(0, 3);
 }
 
+function parseHistoryFromInlineText(text) {
+  const source = clean(text);
+  const history = [];
+  const pattern = /\b(20\d{2})\b\s+€\s*([0-9][0-9.,]*)\s+€\s*(-?[0-9][0-9.,]*)/g;
+
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const year = Number(match[1]);
+    const revenue = parseMoney(match[2]);
+    const profit = parseMoney(match[3]);
+
+    if (!Number.isFinite(revenue) || !Number.isFinite(profit)) continue;
+
+    history.push({ year, revenue, profit });
+  }
+
+  const byYear = new Map();
+  for (const item of history) {
+    if (!byYear.has(item.year)) byYear.set(item.year, item);
+  }
+
+  return [...byYear.values()]
+    .sort((a, b) => b.year - a.year)
+    .slice(0, 3);
+}
+
 export function parseRegistroAziendeText(text, { url = null } = {}) {
   const source = String(text || "");
   const lines = normalizeLines(source);
@@ -183,6 +209,10 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
   const revenueValue = scaledMoney(revenueSection);
   const profitValue = scaledMoney(profitSection);
   const history = parseHistoryFromLines(lines);
+  const inlineHistory = parseHistoryFromInlineText(source);
+  const mergedHistory = inlineHistory.length
+    ? inlineHistory
+    : history;
 
   return {
     provider: "RegistroAziende.it",
@@ -203,18 +233,18 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
     financials: {
       revenue: Number.isFinite(revenueValue)
         ? { value: revenueValue, year: Number(revenueSection?.[3]) || null }
-        : history[0]?.revenue
-          ? { value: history[0].revenue, year: history[0].year }
+        : mergedHistory[0]?.revenue
+          ? { value: mergedHistory[0].revenue, year: mergedHistory[0].year }
           : null,
       profit: Number.isFinite(profitValue)
         ? { value: profitValue, year: Number(profitSection?.[3]) || null }
-        : history[0]?.profit
-          ? { value: history[0].profit, year: history[0].year }
+        : mergedHistory[0]?.profit
+          ? { value: mergedHistory[0].profit, year: mergedHistory[0].year }
           : null,
       employees: employees
         ? { value: null, display: employees, year: null }
         : null,
-      balanceHistory: history
+      balanceHistory: mergedHistory
     }
   };
 }
@@ -318,7 +348,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchSlug(slug) {
-  const key = `registro:v1:${slug}`;
+  const key = `registro:v2:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
