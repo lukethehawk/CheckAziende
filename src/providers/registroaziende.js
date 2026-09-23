@@ -456,6 +456,35 @@ async function fetchSlug(slug) {
   }
 }
 
+async function fetchCandidates(slugs) {
+  const companies = [];
+  const byVat = new Map();
+
+  for (let i = 0; i < slugs.length; i += 4) {
+    const batch = slugs.slice(i, i + 4);
+    const results = await Promise.all(batch.map(fetchSlug));
+
+    for (const company of results) {
+      if (!company?.vat || byVat.has(company.vat)) continue;
+      byVat.set(company.vat, company);
+      companies.push(company);
+    }
+  }
+
+  return companies;
+}
+
+export async function findRegistroAziendeCompaniesByContext({
+  names = [],
+  cityHints = []
+} = {}) {
+  if (!names?.length) return [];
+
+  return fetchCandidates(
+    buildRegistroSlugCandidates(names, cityHints)
+  );
+}
+
 export async function findRegistroAziendeCompanyByVat(
   vat,
   { names = [], cityHints = [] } = {}
