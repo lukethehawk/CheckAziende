@@ -3,6 +3,7 @@ import {
   findAziendeCompanyByVat,
   findAziendeCompaniesByContext
 } from "../providers/aziende.js";
+import { findXrayCompanyByVat } from "../providers/xray.js";
 import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
 import { buildDomainLookupContext, uniqueBrandHints } from "../domain.js";
 import {
@@ -10,6 +11,7 @@ import {
   assessVatMatch,
   confidenceLabel
 } from "../confidence.js";
+import { evaluateFinancialProfile } from "../financial-evaluation.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -25,7 +27,6 @@ const elements = {
   companyBadges: document.querySelector("#company-badges"),
   statusBadge: document.querySelector("#status-badge"),
   ageBadge: document.querySelector("#age-badge"),
-  balancesBadge: document.querySelector("#balances-badge"),
   vat: document.querySelector("#company-vat"),
   address: document.querySelector("#company-address"),
   addressRow: document.querySelector("#address-row"),
@@ -64,6 +65,12 @@ const elements = {
   profitCard: document.querySelector("#profit-card"),
   profitValue: document.querySelector("#profit-value"),
   profitLabel: document.querySelector("#profit-label"),
+  ebitdaCard: document.querySelector("#ebitda-card"),
+  ebitdaValue: document.querySelector("#ebitda-value"),
+  ebitdaLabel: document.querySelector("#ebitda-label"),
+  ebitdaMarginCard: document.querySelector("#ebitda-margin-card"),
+  ebitdaMarginValue: document.querySelector("#ebitda-margin-value"),
+  ebitdaMarginLabel: document.querySelector("#ebitda-margin-label"),
   revenuePerEmployeeCard: document.querySelector("#revenue-per-employee-card"),
   revenuePerEmployeeValue: document.querySelector("#revenue-per-employee-value"),
   marginCard: document.querySelector("#margin-card"),
@@ -221,7 +228,6 @@ function calculateCompanyAge(dateValue) {
 }
 
 function renderCompanyBadges(company) {
-  const history = company?.financials?.balanceHistory || [];
   const age = calculateCompanyAge(company?.registrationDate);
 
   const setBadge = (element, value) => {
@@ -242,19 +248,9 @@ function renderCompanyBadges(company) {
 
   setBadge(elements.ageBadge, Number.isFinite(age) ? `${age} anni` : null);
 
-  const balanceCount = history.length;
-  setBadge(
-    elements.balancesBadge,
-    balanceCount
-      ? balanceCount === 1
-        ? "1 bilancio"
-        : `${balanceCount} bilanci`
-      : null
-  );
-
   elements.companyBadges.classList.toggle(
     "hidden",
-    !company?.status && !Number.isFinite(age) && !balanceCount
+    !company?.status && !Number.isFinite(age)
   );
 }
 
@@ -285,9 +281,12 @@ function renderBalanceHistory(history) {
 
     const profit = document.createElement("span");
     profit.className = "balance-history-profit";
-    profit.textContent = Number.isFinite(item.profit)
-      ? `${item.profit < 0 ? "perdita" : "utile"} ${formatCompactCurrency(item.profit)}`
-      : "";
+    if (Number.isFinite(item.profit)) {
+      profit.classList.add(item.profit < 0 ? "financial-negative" : "financial-positive");
+      profit.textContent = `${item.profit < 0 ? "perdita" : "utile"} ${formatCompactCurrency(item.profit)}`;
+    } else {
+      profit.textContent = "";
+    }
 
     row.append(year, revenue, profit);
     elements.balanceHistory.append(row);
@@ -305,6 +304,7 @@ function normalizeCompany(providerData, viesData, fallbackVat) {
 
   return {
     provider: providerData?.provider || null,
+    providers: providerData?.provider ? [providerData.provider] : [],
     providerUrl: providerData?.providerUrl || null,
     name: providerData?.name || viesData?.name || null,
     vat,
@@ -321,8 +321,57 @@ function normalizeCompany(providerData, viesData, fallbackVat) {
     province: providerData?.province || null,
     region: providerData?.region || null,
     ateco: providerData?.ateco || null,
-    financials: providerData?.financials || null
+    financials: providerData?.financials ? { ...providerData.financials } : {}
   };
+}
+
+function enrichCompanyWithXray(company, xray) {
+  if (!xray?.financials) return company;
+
+  const financials = company.financials || {};
+  const year = xray.financials.year || null;
+
+  if (Number.isFinite(xray.financials.ebitda)) {
+    financials.ebitda = {
+      value: xray.financials.ebitda,
+      year
+    };
+  }
+
+  if (Number.isFinite(xray.financials.ebitdaMargin)) {
+    financials.ebitdaMargin = {
+      value: xray.financials.ebitdaMargin,
+      year
+    };
+  }
+
+  if (!Number.isFinite(financials.revenue?.value) && Number.isFinite(xray.financials.revenue)) {
+    financials.revenue = { value: xray.financials.revenue, year };
+  }
+
+  if (!Number.isFinite(financials.profit?.value) && Number.isFinite(xray.financials.profit)) {
+    financials.profit = { value: xray.financials.profit, year };
+  }
+
+  if (!financials.employees && Number.isFinite(xray.financials.employees)) {
+    financials.employees = {
+      value: xray.financials.employees,
+      display: String(xray.financials.employees),
+      year
+    };
+  }
+
+  financials.netWorth = Number.isFinite(xray.financials.netWorth)
+    ? xray.financials.netWorth
+    : financials.netWorth ?? null;
+  financials.pfn = Number.isFinite(xray.financials.pfn)
+    ? xray.financials.pfn
+    : financials.pfn ?? null;
+
+  company.financials = financials;
+  company.providers = unique([...(company.providers || []), xray.provider]);
+  company.provider = company.providers.join(" · ");
+  return company;
 }
 
 function fallbackCompanyName(company, source) {
@@ -360,18 +409,24 @@ function renderFinancials(financials) {
   const revenue = financials?.revenue;
   const employees = financials?.employees;
   const profit = financials?.profit;
+  const ebitda = financials?.ebitda;
+  const ebitdaMargin = financials?.ebitdaMargin;
   const margin = financials?.netMargin;
   const revenuePerEmployee = financials?.revenuePerEmployee;
 
   const hasRevenue = Number.isFinite(revenue?.value);
   const hasEmployees = Boolean(employees?.display || Number.isFinite(employees?.value));
   const hasProfit = Number.isFinite(profit?.value);
+  const hasEbitda = Number.isFinite(ebitda?.value);
+  const hasEbitdaMargin = Number.isFinite(ebitdaMargin?.value);
   const hasMargin = Number.isFinite(margin);
   const hasRevenuePerEmployee = Number.isFinite(revenuePerEmployee);
   const hasAny =
     hasRevenue ||
     hasEmployees ||
     hasProfit ||
+    hasEbitda ||
+    hasEbitdaMargin ||
     hasMargin ||
     hasRevenuePerEmployee;
 
@@ -392,11 +447,34 @@ function renderFinancials(financials) {
   }
 
   elements.profitCard.classList.toggle("hidden", !hasProfit);
+  elements.profitValue.classList.remove("financial-positive", "financial-negative");
   if (hasProfit) {
+    const isLoss = profit.value < 0;
+    elements.profitValue.classList.add(
+      isLoss ? "financial-negative" : "financial-positive"
+    );
     elements.profitValue.textContent = formatCompactCurrency(profit.value);
     elements.profitLabel.textContent = profit.year
-      ? `utile ${profit.year}`
-      : "utile";
+      ? `${isLoss ? "perdita" : "utile"} ${profit.year}`
+      : isLoss
+        ? "perdita"
+        : "utile";
+  }
+
+  elements.ebitdaCard.classList.toggle("hidden", !hasEbitda);
+  if (hasEbitda) {
+    elements.ebitdaValue.textContent = formatCompactCurrency(ebitda.value);
+    elements.ebitdaLabel.textContent = ebitda.year
+      ? `EBITDA ${ebitda.year}`
+      : "EBITDA";
+  }
+
+  elements.ebitdaMarginCard.classList.toggle("hidden", !hasEbitdaMargin);
+  if (hasEbitdaMargin) {
+    elements.ebitdaMarginValue.textContent = formatPercent(ebitdaMargin.value);
+    elements.ebitdaMarginLabel.textContent = ebitdaMargin.year
+      ? `EBITDA margin ${ebitdaMargin.year}`
+      : "EBITDA margin";
   }
 
   elements.revenuePerEmployeeCard.classList.toggle(
@@ -428,7 +506,7 @@ function renderProviderSource(company) {
     return;
   }
 
-  elements.providerSource.textContent = `Fonte dati: ${company.provider}`;
+  elements.providerSource.textContent = `Fonti dati: ${company.provider}`;
   elements.providerSource.classList.remove("hidden");
 }
 
@@ -578,6 +656,18 @@ async function lookupVat(
 
   const company = normalizeCompany(providerData, viesData, vat);
 
+  setLoading("Recupero EBITDA e indicatori finanziari…");
+
+  const xrayData = await findXrayCompanyByVat(vat, {
+    names: unique([
+      company.name,
+      ...providerNames(viesData)
+    ])
+  });
+
+  enrichCompanyWithXray(company, xrayData);
+  company.evaluation = evaluateFinancialProfile(company);
+
   const assessment = assessVatMatch({
     candidate,
     company: {
@@ -665,6 +755,16 @@ async function lookupCompanyFromDomain() {
   if (!best) return false;
 
   const company = normalizeCompany(best.company, null, best.company.vat);
+
+  setLoading("Recupero EBITDA e indicatori finanziari…");
+  const xrayData = await findXrayCompanyByVat(company.vat, {
+    names: unique([
+      company.name,
+      ...names
+    ])
+  });
+  enrichCompanyWithXray(company, xrayData);
+  company.evaluation = evaluateFinancialProfile(company);
 
   renderCompany(company, {
     source: "domain",
