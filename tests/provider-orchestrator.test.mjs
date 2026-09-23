@@ -62,18 +62,20 @@ test("provider verification flags material revenue conflict", () => {
   assert.equal(result.verified, false);
 });
 
-test("complete primary provider does not require blocking fallback", () => {
+test("fresh complete primary provider does not require blocking fallback", () => {
   assert.equal(needsFallback({
     status: "Attiva",
     ateco: { code: "46.50.1" },
     financials: {
-      revenue: { value: 1_992_222, year: 2024 },
-      profit: { value: 236_014, year: 2024 },
+      revenue: { value: 1_820_000, year: 2025 },
+      profit: { value: 266_000, year: 2025 },
       balanceHistory: [
-        { year: 2024 },
-        { year: 2023 }
+        { year: 2025 },
+        { year: 2024 }
       ]
     }
+  }, {
+    now: new Date(2026, 8, 23)
   }), false);
 });
 
