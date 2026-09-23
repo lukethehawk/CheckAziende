@@ -123,6 +123,7 @@ L'accesso cross-origin è limitato a `www.aziende.it` e VIES.
 - Public Suffix List completa per i domini internazionali;
 - fixture HTML reali per i provider;
 - separazione ulteriore tra controller e renderer del popup;
+- possibile resolver dedicato dominio → proprietario del sito, mantenuto separato e disattivabile;
 - packaging e release Firefox/Chromium.
 
 Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.
@@ -220,3 +221,35 @@ Il fallback Privacy/Legal estrae ora la ragione sociale del titolare usando prim
 ## Provider recovery 0.7.10
 
 Gli snapshot freschi ma incompleti non congelano più per 24 ore i provider mancanti: se Xray Finance non era pronto al primo caricamento, viene ritentato in background alle aperture successive mantenendo il render immediato dalla cache. Il fallback per dominio usa ora anche RegistroAziende come sorgente di discovery, utile quando Privacy/Legal identifica il titolare per nome ma Aziende.it non espone la società. Le pagine Privacy/Legal possono inoltre fornire un hint di città dal blocco del titolare, ad esempio `Xray Finance Srl - ... Bolzano`, così RegistroAziende può risolvere lo slug corretto.
+
+
+## Possibile resolver dominio → proprietario
+
+Per ora il progetto mantiene il metodo attuale di identificazione. È stata però annotata come possibile evoluzione futura l'introduzione di un resolver dedicato al proprietario del dominio, separato dalla società descritta nella pagina.
+
+L'obiettivo sarebbe distinguere in modo esplicito tre concetti:
+- proprietario del sito/dominio;
+- società descritta nella pagina corrente;
+- società cercata manualmente dall'utente.
+
+Un caso tipico è una directory o un portale dati: una pagina può descrivere una società terza, mentre il dominio appartiene a un'altra società. Il resolver lavorerebbe quindi sul dominio registrabile e sui segnali del sito, non sul contenuto aziendale della singola scheda.
+
+Architettura ipotizzata:
+- nuovo modulo isolato, ad esempio `src/site-owner-resolver.js`;
+- feature flag per poterlo disattivare immediatamente in caso di regressioni;
+- metodo attuale lasciato invariato come fallback;
+- cache separata, ad esempio `site-owner:v1:xrayfinance.it`, senza interferire con le cache dei provider;
+- stati conservativi `identified`, `possible`, `unknown`;
+- solo gli owner risolti con evidenza forte verrebbero riutilizzati automaticamente alle aperture successive.
+
+Ordine di evidenza previsto:
+1. P.IVA esplicita in footer/area legale della pagina corrente;
+2. P.IVA trovata in Privacy / Note legali / Contatti;
+3. ragione sociale del titolare ricavata da Privacy/Legal;
+4. risoluzione della ragione sociale tramite Aziende.it e RegistroAziende;
+5. dominio, logo, `og:site_name`, copyright e brand come segnali di coerenza;
+6. Xray Finance usato come verifica/arricchimento finanziario, non come fonte primaria per stabilire il proprietario del dominio.
+
+Il resolver non dovrebbe dipendere da un singolo provider: Aziende.it e RegistroAziende sarebbero le fonti principali per risolvere nome → società/P.IVA, mentre Xray resterebbe soprattutto un provider finanziario.
+
+La scelta attuale è di non implementarlo ancora: i casi esistenti vengono gestiti con il flusso corrente e il resolver resta una possibile evoluzione architetturale generale, da introdurre solo se i casi directory/portali diventano abbastanza frequenti da giustificarlo.
