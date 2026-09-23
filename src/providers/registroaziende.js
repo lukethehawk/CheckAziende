@@ -111,7 +111,9 @@ function parseHistoryFromLines(lines) {
       .map(parseMoney)
       .filter(Number.isFinite);
 
-    if (!money.length) continue;
+    // Historical rows contain both turnover and profit/loss. Summary blocks
+    // above the table may also contain a year and one monetary value.
+    if (money.length < 2) continue;
 
     history.push({
       year: Number(year),
