@@ -11,6 +11,7 @@ import {
   assessVatMatch,
   confidenceLabel
 } from "../confidence.js";
+import { evaluateFinancialProfile } from "../financial-evaluation.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -665,6 +666,7 @@ async function lookupVat(
   });
 
   enrichCompanyWithXray(company, xrayData);
+  company.evaluation = evaluateFinancialProfile(company);
 
   const assessment = assessVatMatch({
     candidate,
@@ -762,6 +764,7 @@ async function lookupCompanyFromDomain() {
     ])
   });
   enrichCompanyWithXray(company, xrayData);
+  company.evaluation = evaluateFinancialProfile(company);
 
   renderCompany(company, {
     source: "domain",
