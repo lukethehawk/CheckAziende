@@ -240,14 +240,34 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
       : null,
     financials: {
       revenue: Number.isFinite(revenueValue)
-        ? { value: revenueValue, year: Number(revenueSection?.[3]) || null }
+        ? {
+            value: revenueValue,
+            year: Number(revenueSection?.[3]) || null,
+            source: "RegistroAziende.it",
+            isFiled: true
+          }
         : mergedHistory[0]?.revenue
-          ? { value: mergedHistory[0].revenue, year: mergedHistory[0].year }
+          ? {
+              value: mergedHistory[0].revenue,
+              year: mergedHistory[0].year,
+              source: "RegistroAziende.it",
+              isFiled: true
+            }
           : null,
       profit: Number.isFinite(profitValue)
-        ? { value: profitValue, year: Number(profitSection?.[3]) || null }
+        ? {
+            value: profitValue,
+            year: Number(profitSection?.[3]) || null,
+            source: "RegistroAziende.it",
+            isFiled: true
+          }
         : mergedHistory[0]?.profit
-          ? { value: mergedHistory[0].profit, year: mergedHistory[0].year }
+          ? {
+              value: mergedHistory[0].profit,
+              year: mergedHistory[0].year,
+              source: "RegistroAziende.it",
+              isFiled: true
+            }
           : null,
       employees: employees
         ? { value: null, display: employees, year: null }
@@ -366,7 +386,9 @@ export function parseRegistroAziendePage(html, url) {
         Number.isFinite(latest.revenue)) {
       company.financials.revenue = {
         value: latest.revenue,
-        year: latest.year
+        year: latest.year,
+        source: "RegistroAziende.it",
+        isFiled: true
       };
     }
 
@@ -374,7 +396,9 @@ export function parseRegistroAziendePage(html, url) {
         Number.isFinite(latest.profit)) {
       company.financials.profit = {
         value: latest.profit,
-        year: latest.year
+        year: latest.year,
+        source: "RegistroAziende.it",
+        isFiled: true
       };
     }
   }
