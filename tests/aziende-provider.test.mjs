@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   buildSlugCandidates,
   inferCompanyStatus,
+  legalNameLookupVariants,
   parseAziendeText,
   parseBalanceHistoryRows,
+  shouldCacheAziendeMiss,
   slugifyCompanyName
 } from "../src/providers/aziende.js";
 
@@ -324,4 +326,32 @@ test("builds Italian subsidiary variants only for domain-context lookup", () => 
   assert.equal(normal.includes("creditsafe-italia-s-r-l"), false);
   assert.ok(domainFallback.includes("creditsafe-italia-s-r-l"));
   assert.ok(domainFallback.indexOf("creditsafe-italia-s-r-l") < 12);
+});
+
+
+test("normalizes noisy VIES legal names into canonical Aziende slug candidates", () => {
+  const variants = legalNameLookupVariants(
+    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  );
+  const slugs = buildSlugCandidates([
+    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  ]);
+
+  assert.ok(variants.includes("MPS MONITOR SRL"));
+  assert.ok(slugs.includes("mps-monitor-srl"));
+  assert.ok(slugs.indexOf("mps-monitor-srl") < 8);
+});
+
+test("keeps the original noisy legal name as a lookup candidate", () => {
+  const variants = legalNameLookupVariants("ACME SRL A SOCIO UNICO");
+
+  assert.ok(variants.includes("ACME SRL A SOCIO UNICO"));
+  assert.ok(variants.includes("ACME SRL"));
+});
+
+test("Aziende negative cache stores only durable 404 misses", () => {
+  assert.equal(shouldCacheAziendeMiss(404), true);
+  assert.equal(shouldCacheAziendeMiss(429), false);
+  assert.equal(shouldCacheAziendeMiss(500), false);
+  assert.equal(shouldCacheAziendeMiss(503), false);
 });
