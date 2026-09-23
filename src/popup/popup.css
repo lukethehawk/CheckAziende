@@ -563,3 +563,109 @@ input:focus {
 .financial-negative {
   color: #c13b3b !important;
 }
+
+
+.financial-profile-section {
+  margin-top: 14px;
+  border-top: 1px solid #eceef2;
+  border-bottom: 1px solid #eceef2;
+}
+
+.financial-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.financial-profile-summary::-webkit-details-marker {
+  display: none;
+}
+
+.financial-profile-summary::after {
+  content: "⌄";
+  margin-left: 2px;
+  color: #8a8f99;
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+
+.financial-profile-section[open] .financial-profile-summary::after {
+  transform: rotate(180deg);
+}
+
+.financial-profile-label {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f1f3f6;
+  color: #68707e;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.financial-profile-label.profile-solid {
+  background: #eef9f1;
+  color: #24804a;
+}
+
+.financial-profile-label.profile-good {
+  background: #eef3ff;
+  color: #3159c7;
+}
+
+.financial-profile-label.profile-intermediate {
+  background: #fff6e5;
+  color: #966519;
+}
+
+.financial-profile-label.profile-fragile,
+.financial-profile-label.profile-weak {
+  background: #fff0f0;
+  color: #b94747;
+}
+
+.financial-profile-body {
+  padding: 0 0 10px;
+}
+
+.financial-profile-metrics {
+  border-top: 1px solid #f0f1f4;
+}
+
+.financial-profile-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 10px;
+}
+
+.financial-profile-row span {
+  color: #7f858f;
+}
+
+.financial-profile-row strong {
+  color: #313640;
+  font-size: 10px;
+  text-align: right;
+}
+
+.financial-profile-completeness {
+  margin-top: 8px;
+  color: #7f858f;
+  font-size: 9px;
+}
+
+.financial-profile-note {
+  margin-top: 5px;
+  color: #a0a4ac;
+  font-size: 8.5px;
+  line-height: 1.4;
+}
