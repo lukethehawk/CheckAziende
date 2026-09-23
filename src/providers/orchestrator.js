@@ -110,15 +110,35 @@ async function readSnapshot(vat) {
 
 async function writeSnapshot(vat, result) {
   try {
+    const key = snapshotKey(vat);
+    const stored = await api.storage.local.get(key);
+    const previous = stored?.[key]?.value || {};
+
+    const aziende = result.aziende || previous.aziende || null;
+    const registro = result.registro || previous.registro || null;
+    const xray = result.xray || previous.xray || null;
+
+    // Once Aziende.it has resolved, never let a later async fallback write
+    // downgrade the canonical company back to RegistroAziende.
+    const primary =
+      aziende ||
+      result.primary ||
+      previous.primary ||
+      registro ||
+      null;
+
     await api.storage.local.set({
-      [snapshotKey(vat)]: {
+      [key]: {
         cachedAt: Date.now(),
         value: {
-          primary: result.primary || null,
-          aziende: result.aziende || null,
-          xray: result.xray || null,
-          registro: result.registro || null,
-          verification: result.verification || null
+          primary,
+          aziende,
+          xray,
+          registro,
+          verification:
+            result.verification ??
+            previous.verification ??
+            null
         }
       }
     });
@@ -248,7 +268,8 @@ async function resolveNetwork({
   const backgroundVerification = registro
     ? null
     : buildRegistroPromise(aziendeFast).then(async (value) => {
-        const canonical = aziendeFast || primary;
+        const eventualAziende = aziendeFast || await aziendePromise;
+        const canonical = eventualAziende || primary || value;
         const update = {
           registro: value,
           verification: compareProviderData(canonical, value)
@@ -256,7 +277,7 @@ async function resolveNetwork({
 
         await writeSnapshot(vat, {
           primary: canonical,
-          aziende: aziendeFast,
+          aziende: eventualAziende,
           xray,
           registro: value,
           verification: update.verification
