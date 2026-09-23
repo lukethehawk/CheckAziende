@@ -169,7 +169,7 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
 
   function scaledMoney(match) {
     if (!match) return null;
-    const number = Number(String(match[1]).replace(/\./g, "").replace(",", "."));
+    const number = Number(String(match[1]).replace(",", "."));
     if (!Number.isFinite(number)) return null;
     const suffix = String(match[2] || "").toUpperCase();
     if (suffix === "B") return number * 1_000_000_000;
@@ -217,10 +217,78 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
   };
 }
 
+function parseHistoryFromDocument(doc) {
+  for (const table of doc.querySelectorAll("table")) {
+    const headers = [...table.querySelectorAll("th")].map((cell) =>
+      clean(cell.textContent).toLowerCase()
+    );
+
+    if (!headers.some((value) => value.includes("fatturato")) ||
+        !headers.some((value) => /utile|perdita/.test(value))) {
+      continue;
+    }
+
+    const history = [];
+
+    for (const row of table.querySelectorAll("tr")) {
+      const cells = [...row.querySelectorAll("td")].map((cell) =>
+        clean(cell.textContent)
+      );
+      if (cells.length < 3) continue;
+
+      const year = cells[0].match(/^(20\d{2})$/)?.[1];
+      if (!year) continue;
+
+      const revenue = /accedi/i.test(cells[1]) ? null : parseMoney(cells[1]);
+      const profit = /accedi/i.test(cells[2]) ? null : parseMoney(cells[2]);
+
+      if (!Number.isFinite(revenue) && !Number.isFinite(profit)) continue;
+
+      history.push({
+        year: Number(year),
+        revenue: Number.isFinite(revenue) ? revenue : null,
+        profit: Number.isFinite(profit) ? profit : null
+      });
+    }
+
+    if (history.length) {
+      return history.sort((a, b) => b.year - a.year).slice(0, 3);
+    }
+  }
+
+  return [];
+}
+
 export function parseRegistroAziendePage(html, url) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const text = doc.body?.innerText || doc.body?.textContent || "";
-  return parseRegistroAziendeText(text, { url });
+  const company = parseRegistroAziendeText(text, { url });
+
+  if (!company) return null;
+
+  const domHistory = parseHistoryFromDocument(doc);
+  if (domHistory.length) {
+    company.financials.balanceHistory = domHistory;
+
+    const latest = domHistory[0];
+    if (!Number.isFinite(company.financials.revenue?.value) &&
+        Number.isFinite(latest.revenue)) {
+      company.financials.revenue = {
+        value: latest.revenue,
+        year: latest.year
+      };
+    }
+
+    if (!Number.isFinite(company.financials.profit?.value) &&
+        Number.isFinite(latest.profit)) {
+      company.financials.profit = {
+        value: latest.profit,
+        year: latest.year
+      };
+    }
+  }
+
+  return company;
 }
 
 async function readCache(key) {
