@@ -72,6 +72,10 @@ export function compareProviderData(primary, verifier) {
   };
 }
 
+export function selectCanonicalPrimary(aziende, registro) {
+  return aziende || registro || null;
+}
+
 export function needsFallback(company) {
   if (!company) return true;
 
@@ -196,7 +200,7 @@ async function resolveNetwork({
     );
   }
 
-  const primary = aziendeFast || registro || null;
+  const primary = selectCanonicalPrimary(aziendeFast, registro);
   const verification = compareProviderData(
     aziendeFast || primary,
     registro
