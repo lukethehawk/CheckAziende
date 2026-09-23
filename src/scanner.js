@@ -509,7 +509,7 @@ export async function scanRelatedPages(urls) {
     if (!names.length) {
       const flattened = String(text || "").replace(/\s+/g, " ").trim();
       const ownerMatch = flattened.match(
-        /(?:Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?|Data\s+Controller)\s*:?[s-]+(.{2,220}?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa)(?:.{0,100})?)(?=Indirizzo\s+email|Tipologie\s+di\s+Dati|$)/i
+        /(?:Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?|Data\s+Controller)\s*:?\s*(.{2,220}?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa)(?:.{0,100})?)(?=Indirizzo\s+email|Tipologie\s+di\s+Dati|$)/i
       );
 
       addOwnerLine(ownerMatch?.[1] || "");
