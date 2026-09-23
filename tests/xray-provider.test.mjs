@@ -70,3 +70,13 @@ test("builds Xray legal-form URL variants", () => {
   assert.ok(gross.includes("computer-gross-s-p-a"));
   assert.ok(gross.includes("computer-gross-spa"));
 });
+
+
+test("normalizes noisy VIES MPS Monitor legal name into Xray candidates", () => {
+  const slugs = buildXraySlugCandidates([
+    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  ]);
+
+  assert.ok(slugs.includes("mps-monitor-srl"));
+  assert.ok(slugs.includes("mps-monitor-s-r-l"));
+});
