@@ -432,3 +432,55 @@ input:focus {
   color: #667084;
   text-decoration: none;
 }
+
+.company-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.company-fact-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eef3ff;
+  color: #3159c7;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.balance-history-section {
+  padding-top: 2px;
+}
+
+.balance-history {
+  margin-top: 6px;
+  border-top: 1px solid #eceef2;
+}
+
+.balance-history-row {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f1f4;
+  font-size: 11px;
+}
+
+.balance-history-year {
+  color: #747a85;
+}
+
+.balance-history-revenue {
+  font-weight: 700;
+}
+
+.balance-history-profit {
+  color: #4f7a5d;
+  font-size: 10px;
+  text-align: right;
+}
