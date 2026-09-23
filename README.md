@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.10`.
+Versione `0.8.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -258,3 +258,23 @@ Ordine di evidenza previsto:
 Il resolver non dovrebbe dipendere da un singolo provider: Aziende.it e RegistroAziende sarebbero le fonti principali per risolvere nome → società/P.IVA, mentre Xray resterebbe soprattutto un provider finanziario.
 
 La scelta attuale è di non implementarlo ancora: i casi esistenti vengono gestiti con il flusso corrente e il resolver resta una possibile evoluzione architetturale generale, da introdurre solo se i casi directory/portali diventano abbastanza frequenti da giustificarlo.
+
+
+## Profilo finanziario 0.8.0
+
+La valutazione finanziaria interna viene ora mostrata nel popup in un accordion compatto **prima dei contatti**, così non appesantisce la scheda principale.
+
+L'interfaccia non espone il punteggio numerico interno. Mostra invece una fascia qualitativa conservativa:
+
+- **Solido**
+- **Buono**
+- **Intermedio**
+- **Fragile**
+- **Debole**
+- **Dati limitati**
+
+Per evitare giudizi troppo forti con informazioni incomplete, una società resta in **Dati limitati** se la copertura dei segnali è inferiore al 50% oppure se non risultano almeno due bilanci depositati.
+
+Nell'accordion vengono mostrati, quando disponibili, bilanci depositati, EBITDA margin, margine netto, trend del fatturato, continuità degli utili e copertura dei dati. La UI specifica che si tratta di un indicatore interno basato sui dati disponibili e non di un rating creditizio.
+
+Le fixture realistiche di Future Tech e Rubino verificano anche che il profilo resti utilizzabile dopo il merge dei provider.
