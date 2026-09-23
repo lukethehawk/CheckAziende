@@ -224,21 +224,60 @@ export function promoteLatestFinancialYear(financials) {
   return result;
 }
 
-export function needsFallback(company) {
+export function financialHistoryNeedsRefresh(
+  financials,
+  { now = new Date() } = {}
+) {
+  const history = Array.isArray(financials?.balanceHistory)
+    ? financials.balanceHistory
+    : [];
+
+  const years = [...new Set(
+    history
+      .map((item) => Number(item?.year))
+      .filter(Number.isFinite)
+  )].sort((a, b) => b - a);
+
+  const summaryYear = Number(financials?.revenue?.year);
+  if (Number.isFinite(summaryYear) && !years.includes(summaryYear)) {
+    years.push(summaryYear);
+    years.sort((a, b) => b - a);
+  }
+
+  if (years.length < 2) return true;
+
+  const latestYear = years[0];
+  const expectedLatest = now.getFullYear() - 1;
+
+  // By the second half of a year, the previous fiscal year is normally the
+  // first one worth checking. This is a trigger for verification, not an
+  // assumption that a filing must exist.
+  const latestMayBeStale =
+    now.getMonth() >= 6 &&
+    latestYear < expectedLatest;
+
+  const topYears = years.slice(0, 3);
+  const hasGap = topYears.some((year, index) =>
+    index > 0 && topYears[index - 1] - year > 1
+  );
+
+  return latestMayBeStale || hasGap;
+}
+
+export function needsFallback(company, options = {}) {
   if (!company) return true;
 
   const financials = company.financials || {};
-  const history = financials.balanceHistory || [];
 
   return !company.status ||
     !company.ateco?.code ||
     !Number.isFinite(financials.revenue?.value) ||
     !Number.isFinite(financials.profit?.value) ||
-    history.length < 2;
+    financialHistoryNeedsRefresh(financials, options);
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v2:${vat}`;
+  return `provider-orchestrator:v3:${vat}`;
 }
 
 async function readSnapshot(vat) {
@@ -314,6 +353,14 @@ async function resolveNetwork({
     names
   }).catch(() => null);
 
+  // Start the verifier immediately using the page/VIES hints we already have.
+  // If we later obtain a better canonical name from Aziende.it we can retry,
+  // but in most cases this removes RegistroAziende from the critical path.
+  const initialRegistroPromise = findRegistroAziendeCompanyByVat(vat, {
+    names,
+    cityHints
+  }).catch(() => null);
+
   const [aziendeFast, xrayFast] = await Promise.all([
     timeoutValue(aziendePromise, PRIMARY_BUDGET_MS),
     timeoutValue(initialXrayPromise, XRAY_BUDGET_MS)
@@ -325,13 +372,24 @@ async function resolveNetwork({
       cityHints: [azienda?.city, ...cityHints].filter(Boolean)
     }).catch(() => null);
 
-  const registroPromise = buildRegistroPromise(aziendeFast);
   let registro = null;
 
   // RegistroAziende is a verifier/fallback. It may fill gaps, but it should
   // never replace a richer Aziende.it record when the latter is available.
   if (needsFallback(aziendeFast)) {
-    registro = await timeoutValue(registroPromise, FALLBACK_BUDGET_MS);
+    registro = await timeoutValue(
+      initialRegistroPromise,
+      FALLBACK_BUDGET_MS
+    );
+
+    // The speculative lookup can miss when only the canonical company name
+    // resolves the public RegistroAziende slug.
+    if (!registro && aziendeFast?.name) {
+      registro = await timeoutValue(
+        buildRegistroPromise(aziendeFast),
+        ENRICHMENT_BUDGET_MS
+      );
+    }
   }
 
   let xray = xrayFast;
@@ -366,7 +424,7 @@ async function resolveNetwork({
           }).catch(() => null);
         }
 
-        let richerRegistro = registro;
+        let richerRegistro = registro || await initialRegistroPromise;
         if (!richerRegistro) {
           richerRegistro = await buildRegistroPromise(azienda);
         }
@@ -419,8 +477,14 @@ async function resolveNetwork({
 
   const backgroundVerification = registro
     ? null
-    : buildRegistroPromise(aziendeFast).then(async (value) => {
+    : initialRegistroPromise.then(async (initialValue) => {
         const eventualAziende = aziendeFast || await aziendePromise;
+        let value = initialValue;
+
+        if (!value && eventualAziende?.name) {
+          value = await buildRegistroPromise(eventualAziende);
+        }
+
         const canonical = eventualAziende || primary || value;
         const update = {
           registro: value,
