@@ -72,6 +72,7 @@ const elements = {
   atecoCode: document.querySelector("#ateco-code"),
   atecoDescription: document.querySelector("#ateco-description"),
   balanceHistorySection: document.querySelector("#balance-history-section"),
+  balanceHistoryCount: document.querySelector("#balance-history-count"),
   balanceHistory: document.querySelector("#balance-history")
 };
 
@@ -230,6 +231,15 @@ function renderCompanyBadges(company) {
   };
 
   setBadge(elements.statusBadge, company?.status);
+  elements.statusBadge.classList.remove("status-active", "status-closed");
+
+  const status = String(company?.status || "").toLowerCase();
+  if (/^attiva\b/.test(status)) {
+    elements.statusBadge.classList.add("status-active");
+  } else if (/cessat|inattiv|chius|liquidaz|fallit/.test(status)) {
+    elements.statusBadge.classList.add("status-closed");
+  }
+
   setBadge(elements.ageBadge, Number.isFinite(age) ? `${age} anni` : null);
 
   const balanceCount = history.length;
@@ -251,6 +261,12 @@ function renderCompanyBadges(company) {
 function renderBalanceHistory(history) {
   const rows = Array.isArray(history) ? history.slice(0, 3) : [];
   elements.balanceHistorySection.classList.toggle("hidden", !rows.length);
+  elements.balanceHistorySection.open = false;
+  elements.balanceHistoryCount.textContent = rows.length
+    ? rows.length === 1
+      ? "1 esercizio"
+      : `${rows.length} esercizi`
+    : "";
   elements.balanceHistory.replaceChildren();
 
   for (const item of rows) {
