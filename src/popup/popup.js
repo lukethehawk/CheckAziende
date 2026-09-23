@@ -325,6 +325,18 @@ function normalizeCompany(providerData, viesData, fallbackVat) {
 function enrichCompanyWithXray(company, xray) {
   if (!xray?.financials) return company;
 
+  const hadPrimaryProvider = Boolean(company.providers?.length);
+
+  // If the registry providers did not resolve, Xray is still VAT-validated and
+  // is preferable to a noisy VIES legal name (e.g. duplicated legal suffixes).
+  if (!hadPrimaryProvider && xray.name) {
+    company.name = xray.name;
+  }
+
+  if ((!company.ateco?.code && !company.ateco?.description) && xray.ateco) {
+    company.ateco = xray.ateco;
+  }
+
   const financials = company.financials || {};
   const year = xray.financials.year || null;
 
@@ -350,7 +362,10 @@ function enrichCompanyWithXray(company, xray) {
     financials.profit = { value: xray.financials.profit, year };
   }
 
-  if (!financials.employees && Number.isFinite(xray.financials.employees)) {
+  if (
+    (!financials.employees || typeof financials.employees !== "object") &&
+    Number.isFinite(xray.financials.employees)
+  ) {
     financials.employees = {
       value: xray.financials.employees,
       display: String(xray.financials.employees),
