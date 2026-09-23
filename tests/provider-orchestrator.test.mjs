@@ -6,6 +6,7 @@ import {
   mergeBalanceHistories,
   needsFallback,
   previousBalanceRows,
+  promoteLatestFinancialYear,
   selectCanonicalPrimary
 } from "../src/providers/orchestrator.js";
 
@@ -146,4 +147,60 @@ test("history accordion excludes the current headline year", () => {
   );
 
   assert.deepEqual(rows.map((item) => item.year), [2023, 2022, 2021]);
+});
+
+
+test("newer verified year becomes the headline financial year", () => {
+  const financials = promoteLatestFinancialYear({
+    revenue: { value: 1_992_222, year: 2024 },
+    profit: { value: 236_014, year: 2024 },
+    employees: { value: 3, display: "3", year: null },
+    netMargin: 11.8,
+    revenuePerEmployee: 664074,
+    balanceHistory: [
+      { year: 2025, revenue: 1_820_000, profit: 266_000 },
+      { year: 2024, revenue: 1_992_222, profit: 236_014 },
+      { year: 2023, revenue: 1_635_153, profit: 173_389 },
+      { year: 2022, revenue: 1_765_110, profit: 166_073 }
+    ]
+  });
+
+  assert.deepEqual(financials.revenue, {
+    value: 1_820_000,
+    year: 2025
+  });
+  assert.deepEqual(financials.profit, {
+    value: 266_000,
+    year: 2025
+  });
+  assert.ok(Math.abs(financials.netMargin - 14.6153846154) < 0.001);
+  assert.equal(financials.revenuePerEmployee, 606666.6666666666);
+
+  const rows = previousBalanceRows(
+    financials.balanceHistory,
+    financials.revenue.year,
+    3
+  );
+
+  assert.deepEqual(rows.map((item) => item.year), [2024, 2023, 2022]);
+});
+
+test("canonical value wins when providers report the same latest year", () => {
+  const merged = mergeBalanceHistories(
+    [
+      { year: 2025, revenue: 1_825_000, profit: 267_000 }
+    ],
+    [
+      { year: 2025, revenue: 1_820_000, profit: 266_000 }
+    ]
+  );
+
+  const financials = promoteLatestFinancialYear({
+    revenue: { value: 1_825_000, year: 2025 },
+    profit: { value: 267_000, year: 2025 },
+    balanceHistory: merged
+  });
+
+  assert.equal(financials.revenue.value, 1_825_000);
+  assert.equal(financials.profit.value, 267_000);
 });
