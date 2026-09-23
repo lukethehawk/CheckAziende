@@ -199,6 +199,56 @@ function inferRevenuePerEmployee(revenue, employees) {
   return revenue.value / employees.value;
 }
 
+function inferBalanceHistory(lines) {
+  const start = lines.findIndex((line) =>
+    /^Ultimi\s+3\s+bilanci\s+disponibili\.?$/i.test(line)
+  );
+
+  if (start < 0) return [];
+
+  const history = [];
+
+  for (let i = start + 1; i < lines.length && history.length < 3; i += 1) {
+    const yearMatch = lines[i].match(/^(20\d{2})$/);
+    if (!yearMatch) continue;
+
+    const year = Number(yearMatch[1]);
+    const row = [];
+
+    for (let j = i + 1; j < lines.length && row.length < 7; j += 1) {
+      if (/^20\d{2}$/.test(lines[j])) break;
+      if (/^(?:Appalti pubblici|Aiuti di Stato|Confronto di settore|Dove si trova|Domande Frequenti)$/i.test(lines[j])) break;
+      row.push(lines[j]);
+    }
+
+    const moneyValues = row
+      .filter((value) => /€|\beuro\b/i.test(value))
+      .map(parseMoney)
+      .filter((value) => Number.isFinite(value));
+
+    const delta = row.find((value) => /%|^—$/.test(value)) || null;
+
+    let employees = null;
+    for (const value of row) {
+      if (/^\d{1,6}$/.test(value)) {
+        employees = Number(value);
+        break;
+      }
+    }
+
+    history.push({
+      year,
+      revenue: moneyValues[0] ?? null,
+      delta,
+      profit: moneyValues[1] ?? null,
+      employees,
+      capital: moneyValues[2] ?? null
+    });
+  }
+
+  return history;
+}
+
 function inferAddress(lines, text) {
   const summary = String(text || "").match(/Sede\s+legale:\s*([^\n]+)/i);
   if (summary?.[1]) return sanitizeField(summary[1]);
@@ -316,6 +366,7 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
       employees,
       netMargin,
       revenuePerEmployee: inferRevenuePerEmployee(revenue, employees),
+      balanceHistory: inferBalanceHistory(lines),
       capital: (() => {
         const value = findLabelValue(lines, ["Capitale Sociale", "Capitale sociale"]);
         const amount = parseMoney(value);

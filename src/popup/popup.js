@@ -22,6 +22,10 @@ const elements = {
   identityBadge: document.querySelector("#identity-badge"),
   name: document.querySelector("#company-name"),
   location: document.querySelector("#company-location"),
+  companyBadges: document.querySelector("#company-badges"),
+  statusBadge: document.querySelector("#status-badge"),
+  ageBadge: document.querySelector("#age-badge"),
+  balancesBadge: document.querySelector("#balances-badge"),
   vat: document.querySelector("#company-vat"),
   address: document.querySelector("#company-address"),
   addressRow: document.querySelector("#address-row"),
@@ -66,7 +70,9 @@ const elements = {
   marginValue: document.querySelector("#margin-value"),
   atecoSection: document.querySelector("#ateco-section"),
   atecoCode: document.querySelector("#ateco-code"),
-  atecoDescription: document.querySelector("#ateco-description")
+  atecoDescription: document.querySelector("#ateco-description"),
+  balanceHistorySection: document.querySelector("#balance-history-section"),
+  balanceHistory: document.querySelector("#balance-history")
 };
 
 let currentScan = null;
@@ -189,6 +195,87 @@ function formatCompactCurrency(value) {
 function formatPercent(value) {
   if (!Number.isFinite(value)) return "—";
   return `${formatCompactNumber(value, 1)}%`;
+}
+
+function calculateCompanyAge(dateValue) {
+  const match = String(dateValue || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const year = Number(match[3]);
+  const registered = new Date(year, month, day);
+
+  if (Number.isNaN(registered.getTime())) return null;
+
+  const now = new Date();
+  let age = now.getFullYear() - registered.getFullYear();
+
+  const anniversaryPassed =
+    now.getMonth() > registered.getMonth() ||
+    (now.getMonth() === registered.getMonth() && now.getDate() >= registered.getDate());
+
+  if (!anniversaryPassed) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function renderCompanyBadges(company) {
+  const history = company?.financials?.balanceHistory || [];
+  const age = calculateCompanyAge(company?.registrationDate);
+
+  const setBadge = (element, value) => {
+    const visible = Boolean(value);
+    element.classList.toggle("hidden", !visible);
+    element.textContent = visible ? value : "";
+  };
+
+  setBadge(elements.statusBadge, company?.status);
+  setBadge(elements.ageBadge, Number.isFinite(age) ? `${age} anni` : null);
+
+  const balanceCount = history.length;
+  setBadge(
+    elements.balancesBadge,
+    balanceCount
+      ? balanceCount === 1
+        ? "1 bilancio"
+        : `${balanceCount} bilanci`
+      : null
+  );
+
+  elements.companyBadges.classList.toggle(
+    "hidden",
+    !company?.status && !Number.isFinite(age) && !balanceCount
+  );
+}
+
+function renderBalanceHistory(history) {
+  const rows = Array.isArray(history) ? history.slice(0, 3) : [];
+  elements.balanceHistorySection.classList.toggle("hidden", !rows.length);
+  elements.balanceHistory.replaceChildren();
+
+  for (const item of rows) {
+    const row = document.createElement("div");
+    row.className = "balance-history-row";
+
+    const year = document.createElement("span");
+    year.className = "balance-history-year";
+    year.textContent = String(item.year || "—");
+
+    const revenue = document.createElement("span");
+    revenue.className = "balance-history-revenue";
+    revenue.textContent = Number.isFinite(item.revenue)
+      ? formatCompactCurrency(item.revenue)
+      : "n/d";
+
+    const profit = document.createElement("span");
+    profit.className = "balance-history-profit";
+    profit.textContent = Number.isFinite(item.profit)
+      ? `${item.profit < 0 ? "perdita" : "utile"} ${formatCompactCurrency(item.profit)}`
+      : "";
+
+    row.append(year, revenue, profit);
+    elements.balanceHistory.append(row);
+  }
 }
 
 function setDetail(row, target, value) {
@@ -400,8 +487,10 @@ function renderCompany(
       ? "P.IVA inserita manualmente"
       : evidenceLabel || "Azienda identificata dal sito";
 
+  renderCompanyBadges(company);
   renderFinancials(company?.financials);
   renderAteco(company?.ateco);
+  renderBalanceHistory(company?.financials?.balanceHistory);
   renderProviderSource(company);
   renderContacts(currentScan);
 

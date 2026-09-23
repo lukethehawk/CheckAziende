@@ -152,3 +152,57 @@ Veneto
   assert.equal(company.financials.revenue, null);
   assert.equal(company.financials.employees.display, "0-9");
 });
+
+
+test("parses the last three available balances", () => {
+  const text = `
+COMPUTER GROSS S.P.A.
+Attiva SOCIETA' PER AZIONI Empoli (FI) ATECO 46.50.1 dal 1997
+P.IVA 04801490485 REA FI-487781
+€ 1.821.753.823
+Fatturato 2025
+€ 39.409.089
+Utile 2025
+Ultimi 3 bilanci disponibili.
+Anno
+Fatturato
+Δ%
+Utile/Perdita
+Dipendenti
+Capitale
+2025
+€ 1.821.753.823
+-8,3%
+€ 39.409.089
+368
+€ 40.000.000
+2024
+€ 1.987.208.400
++8,0%
+€ 48.763.538
+—
+€ 40.000.000
+2023
+€ 1.839.857.066
+—
+€ 41.154.978
+—
+€ 40.000.000
+Appalti pubblici
+`;
+
+  const company = parseAziendeText(text, {
+    name: "COMPUTER GROSS S.P.A."
+  });
+
+  assert.equal(company.financials.balanceHistory.length, 3);
+  assert.deepEqual(
+    company.financials.balanceHistory.map((item) => item.year),
+    [2025, 2024, 2023]
+  );
+  assert.equal(company.financials.balanceHistory[0].revenue, 1821753823);
+  assert.equal(company.financials.balanceHistory[0].profit, 39409089);
+  assert.equal(company.financials.balanceHistory[0].employees, 368);
+  assert.equal(company.financials.balanceHistory[1].revenue, 1987208400);
+  assert.equal(company.financials.balanceHistory[2].profit, 41154978);
+});
