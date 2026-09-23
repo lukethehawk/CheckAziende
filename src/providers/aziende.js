@@ -191,7 +191,9 @@ function inferRevenue(lines) {
   const value = findMoneyBefore(lines, /^Fatturato\s+20\d{2}$/i);
   const year = findYearFromLine(lines, /^Fatturato\s+20\d{2}$/i);
 
-  if (value !== null) return { value, year };
+  if (value !== null) {
+    return { value, year, source: "Aziende.it", isFiled: true };
+  }
 
   const tableValue = findLabelValue(lines, ["Fatturato"]);
   if (!tableValue) return null;
@@ -201,7 +203,9 @@ function inferRevenue(lines) {
 
   return amount === null ? null : {
     value: amount,
-    year: yearMatch ? Number(yearMatch[1]) : null
+    year: yearMatch ? Number(yearMatch[1]) : null,
+    source: "Aziende.it",
+    isFiled: true
   };
 }
 
@@ -219,7 +223,9 @@ function inferProfit(lines) {
 
   return amount === null ? null : {
     value: amount,
-    year: yearMatch ? Number(yearMatch[1]) : null
+    year: yearMatch ? Number(yearMatch[1]) : null,
+    source: "Aziende.it",
+    isFiled: true
   };
 }
 
