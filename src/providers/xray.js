@@ -228,6 +228,163 @@ async function writeCache(key, value) {
   }
 }
 
+
+async function fetchHtml(url, options = {}) {
+  try {
+    const response = await fetch(url, {
+      method: options.method || "GET",
+      body: options.body || undefined,
+      redirect: "follow",
+      credentials: "omit",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml",
+        ...(options.headers || {})
+      }
+    });
+
+    if (!response.ok) {
+      return { response, html: null };
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) {
+      return { response, html: null };
+    }
+
+    return {
+      response,
+      html: await response.text()
+    };
+  } catch {
+    return { response: null, html: null };
+  }
+}
+
+function findSearchInput(doc) {
+  return [...doc.querySelectorAll("input")].find((input) => {
+    const haystack = [
+      input.getAttribute("placeholder"),
+      input.getAttribute("aria-label"),
+      input.getAttribute("name"),
+      input.id
+    ].filter(Boolean).join(" ");
+
+    return /codice\s*fiscale|p\.?\s*iva|partita\s*iva|nome\s*azienda/i.test(haystack);
+  }) || null;
+}
+
+function findCompanyHrefForVat(doc, vat, baseUrl) {
+  for (const anchor of doc.querySelectorAll("a[href]")) {
+    const container =
+      anchor.closest("tr, li, article, [role='option'], [role='row']") ||
+      anchor.parentElement;
+
+    const text = clean(container?.textContent || "");
+    if (!text.includes(vat)) continue;
+
+    try {
+      const url = new URL(anchor.getAttribute("href") || "", baseUrl);
+      if (url.origin !== BASE_URL) continue;
+      if (url.pathname === "/" || url.pathname.startsWith("/b/")) continue;
+      return url.href;
+    } catch {
+      // Ignore malformed links.
+    }
+  }
+
+  return null;
+}
+
+async function findXrayCompanyViaPublicSearch(vat) {
+  const searchKey = `xray:v1:vat-search:${vat}`;
+  const cached = await readCache(searchKey);
+  if (cached) return cached;
+
+  const home = await fetchHtml(`${BASE_URL}/`);
+  if (!home.html) return null;
+
+  const doc = new DOMParser().parseFromString(home.html, "text/html");
+  const input = findSearchInput(doc);
+  const form = input?.closest("form");
+
+  if (!input || !form || !input.name) return null;
+
+  const params = new URLSearchParams();
+
+  for (const field of form.querySelectorAll("input[name], select[name], textarea[name]")) {
+    if (field === input) continue;
+    if (field.disabled) continue;
+
+    const type = String(field.getAttribute("type") || "").toLowerCase();
+    if ((type === "checkbox" || type === "radio") && !field.checked) continue;
+
+    if (field.name && field.value) {
+      params.set(field.name, field.value);
+    }
+  }
+
+  params.set(input.name, vat);
+
+  let action;
+  try {
+    action = new URL(form.getAttribute("action") || "/", BASE_URL);
+  } catch {
+    return null;
+  }
+
+  const method = String(form.getAttribute("method") || "GET").toUpperCase();
+  let result;
+
+  if (method === "POST") {
+    result = await fetchHtml(action.href, {
+      method: "POST",
+      body: params.toString(),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      }
+    });
+  } else {
+    for (const [key, value] of params.entries()) {
+      action.searchParams.set(key, value);
+    }
+    result = await fetchHtml(action.href);
+  }
+
+  if (!result.html || !result.response) return null;
+
+  const directCompany = parseXrayPage(
+    result.html,
+    result.response.url || action.href
+  );
+
+  if (directCompany?.vat === vat) {
+    await writeCache(searchKey, directCompany);
+    return directCompany;
+  }
+
+  const resultDoc = new DOMParser().parseFromString(result.html, "text/html");
+  const href = findCompanyHrefForVat(
+    resultDoc,
+    vat,
+    result.response.url || action.href
+  );
+
+  if (!href) return null;
+
+  const profile = await fetchHtml(href);
+  if (!profile.html || !profile.response) return null;
+
+  const company = parseXrayPage(
+    profile.html,
+    profile.response.url || href
+  );
+
+  if (company?.vat !== vat) return null;
+
+  await writeCache(searchKey, company);
+  return company;
+}
+
 async function fetchSlug(slug) {
   const key = `xray:v2:slug:${slug}`;
   const cached = await readCache(key);
@@ -235,44 +392,34 @@ async function fetchSlug(slug) {
 
   const url = `${BASE_URL}/${encodeURIComponent(slug)}`;
 
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      credentials: "omit",
-      headers: {
-        "Accept": "text/html,application/xhtml+xml"
-      }
-    });
+  const result = await fetchHtml(url);
 
-    if (!response.ok) {
-      // Cache only permanent misses. Transient failures (429/5xx, bot
-      // challenges, etc.) must not poison the provider for 24 hours.
-      if (response.status === 404) {
-        await writeCache(key, null);
-      }
-      return null;
+  if (!result.response?.ok) {
+    // Cache only permanent misses. Transient failures (429/5xx, bot
+    // challenges, etc.) must not poison the provider for 24 hours.
+    if (result.response?.status === 404) {
+      await writeCache(key, null);
     }
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("text/html")) return null;
-
-    const html = await response.text();
-    const company = parseXrayPage(html, response.url || url);
-
-    if (company) {
-      await writeCache(key, company);
-    }
-
-    return company || null;
-  } catch {
     return null;
   }
+
+  if (!result.html) return null;
+
+  const company = parseXrayPage(
+    result.html,
+    result.response.url || url
+  );
+
+  if (company) {
+    await writeCache(key, company);
+  }
+
+  return company || null;
 }
 
-async function firstVatMatch(slugs, vat) {
-  for (let i = 0; i < slugs.length; i += 5) {
-    const batch = slugs.slice(i, i + 5);
+async function firstVatMatch(slugs, vat, { batchSize = 2 } = {}) {
+  for (let i = 0; i < slugs.length; i += batchSize) {
+    const batch = slugs.slice(i, i + batchSize);
     const results = await Promise.all(batch.map(fetchSlug));
     const match = results.find((company) => company?.vat === vat);
     if (match) return match;
@@ -303,12 +450,37 @@ export async function findXrayCompanyByVat(vat, { names = [] } = {}) {
   const bases = buildXraySlugCandidates(names);
   if (!bases.length) return null;
 
-  const direct = await firstVatMatch(bases, targetVat);
+  // Keep speculative slug traffic small. Xray can throttle bursts of misses.
+  const direct = await firstVatMatch(
+    bases.slice(0, 4),
+    targetVat,
+    { batchSize: 2 }
+  );
   if (direct) return direct;
 
-  // Xray disambiguates homonyms with numeric suffixes (e.g. name-2, name-8).
-  // Only enumerate suffixes after direct candidates fail, and always validate VAT.
-  const numbered = buildXrayNumberedSlugCandidates(bases);
+  // Prefer Xray's own public search when the homepage exposes a normal form.
+  // This resolves disambiguated profiles such as rubino-s-r-l-15 without
+  // probing many nonexistent URLs first.
+  const searched = await findXrayCompanyViaPublicSearch(targetVat);
+  if (searched) return searched;
 
-  return firstVatMatch(numbered, targetVat);
+  // Final fallback for sites where the public search is JavaScript-only.
+  // Probe one legal-name base at a time with low concurrency to avoid
+  // triggering throttling before reaching the correct numeric suffix.
+  for (const base of bases.slice(0, 3)) {
+    const numbered = buildXrayNumberedSlugCandidates(
+      [base],
+      { maxBases: 1 }
+    );
+
+    const match = await firstVatMatch(
+      numbered,
+      targetVat,
+      { batchSize: 2 }
+    );
+
+    if (match) return match;
+  }
+
+  return null;
 }
