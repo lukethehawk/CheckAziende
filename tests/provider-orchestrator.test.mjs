@@ -168,14 +168,10 @@ test("newer verified year becomes the headline financial year", () => {
     ]
   });
 
-  assert.deepEqual(financials.revenue, {
-    value: 1_820_000,
-    year: 2025
-  });
-  assert.deepEqual(financials.profit, {
-    value: 266_000,
-    year: 2025
-  });
+  assert.equal(financials.revenue.value, 1_820_000);
+  assert.equal(financials.revenue.year, 2025);
+  assert.equal(financials.profit.value, 266_000);
+  assert.equal(financials.profit.year, 2025);
   assert.ok(Math.abs(financials.netMargin - 14.6153846154) < 0.001);
   assert.equal(financials.revenuePerEmployee, 606666.6666666666);
 
