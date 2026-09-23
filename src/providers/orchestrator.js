@@ -130,6 +130,100 @@ export function previousBalanceRows(history, currentYear, limit = 3) {
     .slice(0, limit);
 }
 
+export function promoteLatestFinancialYear(financials) {
+  const result = {
+    ...(financials || {}),
+    balanceHistory: Array.isArray(financials?.balanceHistory)
+      ? [...financials.balanceHistory]
+      : []
+  };
+
+  const history = result.balanceHistory
+    .filter((item) => Number.isFinite(Number(item?.year)))
+    .sort((a, b) => Number(b.year) - Number(a.year));
+
+  const chooseLatest = (summary, field) => {
+    const summaryYear = Number(summary?.year);
+    const summaryValid =
+      Number.isFinite(summary?.value) &&
+      Number.isFinite(summaryYear);
+
+    const historyRows = history.filter((item) =>
+      Number.isFinite(item?.[field])
+    );
+
+    const latestHistory = historyRows[0] || null;
+    const historyYear = Number(latestHistory?.year);
+
+    if (
+      summaryValid &&
+      (!latestHistory || summaryYear >= historyYear)
+    ) {
+      return {
+        value: summary.value,
+        year: summaryYear
+      };
+    }
+
+    if (latestHistory) {
+      return {
+        value: latestHistory[field],
+        year: historyYear
+      };
+    }
+
+    return summary || null;
+  };
+
+  result.revenue = chooseLatest(result.revenue, "revenue");
+
+  const revenueYear = Number(result.revenue?.year);
+  const matchingProfitRow = history.find((item) =>
+    Number(item?.year) === revenueYear &&
+    Number.isFinite(item?.profit)
+  );
+
+  if (matchingProfitRow) {
+    result.profit = {
+      value: matchingProfitRow.profit,
+      year: revenueYear
+    };
+  } else {
+    result.profit = chooseLatest(result.profit, "profit");
+  }
+
+  const profitYear = Number(result.profit?.year);
+
+  if (
+    Number.isFinite(result.revenue?.value) &&
+    result.revenue.value !== 0 &&
+    Number.isFinite(result.profit?.value) &&
+    revenueYear === profitYear
+  ) {
+    result.netMargin =
+      (result.profit.value / result.revenue.value) * 100;
+  } else if (
+    Number(financials?.revenue?.year) !== revenueYear
+  ) {
+    result.netMargin = null;
+  }
+
+  if (
+    Number.isFinite(result.revenue?.value) &&
+    Number.isFinite(result.employees?.value) &&
+    result.employees.value > 0
+  ) {
+    result.revenuePerEmployee =
+      result.revenue.value / result.employees.value;
+  } else if (
+    Number(financials?.revenue?.year) !== revenueYear
+  ) {
+    result.revenuePerEmployee = null;
+  }
+
+  return result;
+}
+
 export function needsFallback(company) {
   if (!company) return true;
 
