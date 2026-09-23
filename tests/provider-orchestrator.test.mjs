@@ -5,6 +5,7 @@ import {
   compareProviderData,
   financialHistoryNeedsRefresh,
   mergeBalanceHistories,
+  mergeProviderResultState,
   missingProviderRefreshPlan,
   needsFallback,
   previousBalanceRows,
@@ -376,4 +377,63 @@ test("complete cached snapshot does not retry already present Xray", () => {
   });
 
   assert.equal(plan.xray, false);
+});
+
+
+test("async provider merge never drops an already resolved Aziende source", () => {
+  const initial = {
+    primary: {
+      provider: "RegistroAziende.it",
+      vat: "11295150152"
+    },
+    aziende: null,
+    registro: {
+      provider: "RegistroAziende.it",
+      vat: "11295150152"
+    },
+    xray: null
+  };
+
+  const withAziende = mergeProviderResultState(initial, {
+    primary: {
+      provider: "Aziende.it",
+      vat: "11295150152"
+    },
+    aziende: {
+      provider: "Aziende.it",
+      vat: "11295150152"
+    }
+  });
+
+  const withLateXray = mergeProviderResultState(withAziende, {
+    xray: {
+      provider: "Xray Finance",
+      vat: "11295150152"
+    },
+    aziende: null
+  });
+
+  assert.equal(withLateXray.primary.provider, "Aziende.it");
+  assert.equal(withLateXray.aziende.provider, "Aziende.it");
+  assert.equal(withLateXray.registro.provider, "RegistroAziende.it");
+  assert.equal(withLateXray.xray.provider, "Xray Finance");
+});
+
+test("late Registro update cannot downgrade an Aziende canonical primary", () => {
+  const state = mergeProviderResultState(
+    {
+      primary: { provider: "Aziende.it", vat: "05488440651" },
+      aziende: { provider: "Aziende.it", vat: "05488440651" },
+      xray: { provider: "Xray Finance", vat: "05488440651" }
+    },
+    {
+      primary: { provider: "RegistroAziende.it", vat: "05488440651" },
+      registro: { provider: "RegistroAziende.it", vat: "05488440651" }
+    }
+  );
+
+  assert.equal(state.primary.provider, "Aziende.it");
+  assert.equal(state.aziende.provider, "Aziende.it");
+  assert.equal(state.registro.provider, "RegistroAziende.it");
+  assert.equal(state.xray.provider, "Xray Finance");
 });
