@@ -346,16 +346,41 @@ export function scanCurrentPage() {
   const applicationName =
     document.querySelector('meta[name="application-name"]')?.getAttribute("content")?.trim();
 
+  const homepageBrandHints = unique(
+    [...document.querySelectorAll('a[href]')]
+      .map((anchor) => {
+        let url;
+        try {
+          url = new URL(anchor.getAttribute("href") || "", location.href);
+        } catch {
+          return "";
+        }
+
+        if (url.origin !== location.origin) return "";
+        if (url.pathname !== "/" || url.search || url.hash) return "";
+
+        const text = clean(anchor.textContent || "", 80);
+        if (!text || text.length < 2 || text.length > 60) return "";
+        if (/^(?:home|homepage|torna alla home|logo)$/i.test(text)) return "";
+
+        return text;
+      })
+  ).slice(0, 4);
+
   const siteName =
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
     applicationName ||
+    homepageBrandHints[0] ||
     location.hostname;
 
   // H1 and document.title describe the current page and can name a third-party
   // company on directories. Keep brand hints limited to site-level signals.
+  // A same-origin link to "/" is also a strong site-brand signal and covers
+  // portals where the logo is rendered as text instead of an <img>.
   const brandHints = unique([
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim(),
     applicationName,
+    ...homepageBrandHints,
     ...[...document.querySelectorAll('img[alt]')]
       .filter((node) =>
         /logo|brand/i.test(node.className || "") ||
