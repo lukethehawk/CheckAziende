@@ -1,5 +1,5 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
-import { scanCurrentPage } from "../scanner.js";
+import { scanCurrentPage, scanRelatedPages } from "../scanner.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -66,6 +66,25 @@ function isValidItalianVat(value) {
   }
 
   return ((10 - (sum % 10)) % 10) === Number(vat[10]);
+}
+
+function unique(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function mergeRelatedContacts(related) {
+  if (!currentScan) return;
+
+  currentScan.contacts ||= { emails: [], phones: [] };
+  currentScan.contacts.emails = unique([
+    ...(currentScan.contacts.emails || []),
+    ...(related?.contacts?.emails || [])
+  ]).slice(0, 6);
+
+  currentScan.contacts.phones = unique([
+    ...(currentScan.contacts.phones || []),
+    ...(related?.contacts?.phones || [])
+  ]).slice(0, 6);
 }
 
 function setLoading(message) {
@@ -166,7 +185,7 @@ function showUnidentified(message) {
   showManual({ allowCancel: false });
 }
 
-function renderCompany(viesData, { source = "automatic" } = {}) {
+function renderCompany(viesData, { source = "automatic", evidenceLabel = "" } = {}) {
   const vat = viesData?.vatNumber || digitsOnly(elements.input.value);
   const name = fallbackCompanyName(viesData);
   const address = viesData?.address || "";
@@ -186,7 +205,9 @@ function renderCompany(viesData, { source = "automatic" } = {}) {
   elements.location.textContent = cityHint;
 
   elements.sourceStatus.textContent = source === "automatic"
-    ? "P.IVA identificata da footer/area legale del sito"
+    ? evidenceLabel
+      ? `P.IVA identificata da ${evidenceLabel}`
+      : "P.IVA identificata dal sito"
     : "P.IVA inserita manualmente";
 
   renderContacts(currentScan);
@@ -198,7 +219,10 @@ function renderCompany(viesData, { source = "automatic" } = {}) {
   stopLoading();
 }
 
-async function lookupVat(rawVat, { source = "manual", bypassCache = false } = {}) {
+async function lookupVat(
+  rawVat,
+  { source = "manual", bypassCache = false, evidenceLabel = "" } = {}
+) {
   const vat = digitsOnly(rawVat);
 
   if (!isValidItalianVat(vat)) {
@@ -216,7 +240,7 @@ async function lookupVat(rawVat, { source = "manual", bypassCache = false } = {}
 
   try {
     const viesData = await checkItalianVatOnVies(vat, { bypassCache });
-    renderCompany(viesData, { source });
+    renderCompany(viesData, { source, evidenceLabel });
     hideManual();
   } catch {
     renderCompany(
@@ -226,11 +250,35 @@ async function lookupVat(rawVat, { source = "manual", bypassCache = false } = {}
         name: null,
         address: null
       },
-      { source }
+      { source, evidenceLabel }
     );
     hideManual();
   } finally {
     elements.button.disabled = false;
+  }
+}
+
+async function scanFallbackPages(tabId) {
+  const relatedUrls = currentScan?.relatedUrls || [];
+  if (!relatedUrls.length) return null;
+
+  setLoading("Controllo privacy, contatti e note legali…");
+
+  try {
+    const injection = await api.scripting.executeScript({
+      target: { tabId },
+      func: scanRelatedPages,
+      args: [relatedUrls]
+    });
+
+    const mainFrame = injection?.find((item) => item.frameId === 0) || injection?.[0];
+    if (mainFrame?.error) return null;
+
+    const related = mainFrame?.result || null;
+    mergeRelatedContacts(related);
+    return related;
+  } catch {
+    return null;
   }
 }
 
@@ -278,7 +326,13 @@ async function inspectActivePage() {
     currentScan = mainFrame?.result || null;
     if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
-    const candidates = currentScan?.candidates || [];
+    let candidates = currentScan?.candidates || [];
+
+    if (!candidates.length) {
+      const related = await scanFallbackPages(tab.id);
+      candidates = related?.candidates || [];
+    }
+
     if (!candidates.length) {
       showUnidentified(
         "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
@@ -286,7 +340,11 @@ async function inspectActivePage() {
       return;
     }
 
-    await lookupVat(candidates[0].vat, { source: "automatic" });
+    const best = candidates[0];
+    await lookupVat(best.vat, {
+      source: "automatic",
+      evidenceLabel: best.source || "pagina societaria"
+    });
   } catch {
     showUnidentified(
       "Non riesco a identificare automaticamente una società su questa pagina."
