@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { evaluateFinancialProfile } from "../src/financial-evaluation.js";
+import {
+  describeFinancialProfile,
+  evaluateFinancialProfile
+} from "../src/financial-evaluation.js";
 
 test("evaluation tracks the two-filed-balances requirement", () => {
   const result = evaluateFinancialProfile({
@@ -83,4 +86,60 @@ test("generic financial observations do not satisfy filed-balance requirement", 
     result.factors.find((item) => item.key === "balanceHistory").value,
     0
   );
+});
+
+
+test("financial profile label is conservative when filed balances are missing", () => {
+  const evaluation = evaluateFinancialProfile({
+    status: "Attiva",
+    registrationDate: "01/01/2010",
+    financials: {
+      revenue: { value: 3_000_000, year: 2025 },
+      profit: { value: 450_000, year: 2025 },
+      netMargin: 15,
+      ebitda: { value: 600_000, year: 2025 },
+      ebitdaMargin: { value: 20, year: 2025 },
+      balanceHistory: [
+        {
+          year: 2025,
+          revenue: 3_000_000,
+          profit: 450_000,
+          source: "Xray Finance",
+          isFiled: false
+        }
+      ]
+    }
+  });
+
+  assert.equal(evaluation.requirements.atLeastTwoFiledBalances, false);
+  assert.equal(describeFinancialProfile(evaluation).label, "Dati limitati");
+});
+
+test("financial profile label exposes a solid band only with sufficient coverage", () => {
+  const description = describeFinancialProfile({
+    score: 86,
+    completeness: 100,
+    requirements: {
+      atLeastTwoFiledBalances: true
+    }
+  });
+
+  assert.deepEqual(description, {
+    key: "solid",
+    label: "Solido"
+  });
+});
+
+test("financial profile bands remain qualitative around score thresholds", () => {
+  const base = {
+    completeness: 83,
+    requirements: {
+      atLeastTwoFiledBalances: true
+    }
+  };
+
+  assert.equal(describeFinancialProfile({ ...base, score: 72 }).label, "Buono");
+  assert.equal(describeFinancialProfile({ ...base, score: 58 }).label, "Intermedio");
+  assert.equal(describeFinancialProfile({ ...base, score: 41 }).label, "Fragile");
+  assert.equal(describeFinancialProfile({ ...base, score: 22 }).label, "Debole");
 });

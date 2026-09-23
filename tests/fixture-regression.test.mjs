@@ -23,6 +23,10 @@ import {
   assessVatMatch
 } from "../src/confidence.js";
 import {
+  describeFinancialProfile,
+  evaluateFinancialProfile
+} from "../src/financial-evaluation.js";
+import {
   extractFooterText,
   htmlToText,
   loadFixture,
@@ -59,6 +63,12 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
   assert.equal(company.financials.profit.value, 266_000);
   assert.ok(company.provider.includes("Aziende.it"));
   assert.ok(company.provider.includes("RegistroAziende.it"));
+
+  const evaluation = evaluateFinancialProfile(company, {
+    now: new Date(2026, 8, 23)
+  });
+  assert.equal(evaluation.requirements.atLeastTwoFiledBalances, true);
+  assert.notEqual(describeFinancialProfile(evaluation).key, "limited");
 });
 
 test("fixture: Rubino keeps Xray enrichment after canonical Aziende data", async () => {
@@ -88,6 +98,12 @@ test("fixture: Rubino keeps Xray enrichment after canonical Aziende data", async
   assert.equal(company.financials.revenue.value, 2_277_793);
   assert.ok(company.provider.includes("Aziende.it"));
   assert.ok(company.provider.includes("Xray Finance"));
+
+  const evaluation = evaluateFinancialProfile(company, {
+    now: new Date(2026, 8, 23)
+  });
+  assert.equal(evaluation.requirements.atLeastTwoFiledBalances, true);
+  assert.notEqual(describeFinancialProfile(evaluation).key, "limited");
 });
 
 test("fixture: MPS Monitor retains the latest three RegistroAziende balances", async () => {

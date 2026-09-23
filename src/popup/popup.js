@@ -17,7 +17,10 @@ import {
   assessVatMatch,
   confidenceLabel
 } from "../confidence.js";
-import { evaluateFinancialProfile } from "../financial-evaluation.js";
+import {
+  describeFinancialProfile,
+  evaluateFinancialProfile
+} from "../financial-evaluation.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -87,7 +90,11 @@ const elements = {
   atecoDescription: document.querySelector("#ateco-description"),
   balanceHistorySection: document.querySelector("#balance-history-section"),
   balanceHistoryCount: document.querySelector("#balance-history-count"),
-  balanceHistory: document.querySelector("#balance-history")
+  balanceHistory: document.querySelector("#balance-history"),
+  financialProfileSection: document.querySelector("#financial-profile-section"),
+  financialProfileLabel: document.querySelector("#financial-profile-label"),
+  financialProfileMetrics: document.querySelector("#financial-profile-metrics"),
+  financialProfileCompleteness: document.querySelector("#financial-profile-completeness")
 };
 
 let currentScan = null;
@@ -523,6 +530,111 @@ function renderProviderSource(company) {
   elements.providerSource.classList.remove("hidden");
 }
 
+function evaluationFactor(evaluation, key) {
+  return evaluation?.factors?.find((factor) => factor?.key === key) || null;
+}
+
+function signedPercent(value) {
+  if (!Number.isFinite(value)) return "Non disponibile";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatCompactNumber(value, 1)}%`;
+}
+
+function renderFinancialProfile(evaluation) {
+  if (!evaluation) {
+    elements.financialProfileSection.classList.add("hidden");
+    return;
+  }
+
+  const description = describeFinancialProfile(evaluation);
+  const rows = [];
+
+  const balanceFactor = evaluationFactor(evaluation, "balanceHistory");
+  const filedBalances = Number(balanceFactor?.value);
+  const observedYears = Number(balanceFactor?.observedFinancialYears);
+
+  if (Number.isFinite(filedBalances)) {
+    const observedSuffix =
+      Number.isFinite(observedYears) && observedYears > filedBalances
+        ? ` su ${observedYears} osservati`
+        : "";
+    rows.push(["Bilanci depositati", `${filedBalances}${observedSuffix}`]);
+  }
+
+  if (Number.isFinite(evaluation.metrics?.ebitdaMargin)) {
+    rows.push([
+      "EBITDA margin",
+      formatPercent(evaluation.metrics.ebitdaMargin)
+    ]);
+  }
+
+  if (Number.isFinite(evaluation.metrics?.netMargin)) {
+    rows.push([
+      "Margine netto",
+      formatPercent(evaluation.metrics.netMargin)
+    ]);
+  }
+
+  if (Number.isFinite(evaluation.metrics?.revenueTrend)) {
+    rows.push([
+      "Trend fatturato",
+      signedPercent(evaluation.metrics.revenueTrend)
+    ]);
+  }
+
+  const profitFactor = evaluationFactor(evaluation, "profitConsistency");
+  if (profitFactor?.value) {
+    const [positive, total] = String(profitFactor.value)
+      .split("/")
+      .map(Number);
+
+    if (Number.isFinite(positive) && Number.isFinite(total)) {
+      rows.push([
+        "Continuità utili",
+        `${positive}/${total} esercizi`
+      ]);
+    }
+  }
+
+  const hasFinancialSignals =
+    (Number.isFinite(observedYears) && observedYears > 0) ||
+    Number.isFinite(evaluation.metrics?.ebitdaMargin) ||
+    Number.isFinite(evaluation.metrics?.netMargin) ||
+    Number.isFinite(evaluation.metrics?.revenueTrend);
+
+  if (!hasFinancialSignals) {
+    elements.financialProfileSection.classList.add("hidden");
+    return;
+  }
+
+  elements.financialProfileLabel.textContent = description.label;
+  elements.financialProfileLabel.className =
+    `financial-profile-label profile-${description.key}`;
+
+  elements.financialProfileMetrics.textContent = "";
+
+  for (const [label, value] of rows) {
+    const row = document.createElement("div");
+    row.className = "financial-profile-row";
+
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+
+    row.append(labelNode, valueNode);
+    elements.financialProfileMetrics.append(row);
+  }
+
+  elements.financialProfileCompleteness.textContent =
+    Number.isFinite(evaluation.completeness)
+      ? `Copertura dati: ${evaluation.completeness}%`
+      : "";
+
+  elements.financialProfileSection.classList.remove("hidden");
+}
+
 function showUnidentified(message) {
   companyIsVisible = false;
   elements.companyView.classList.add("hidden");
@@ -592,6 +704,7 @@ function renderCompany(
     company?.financials?.revenue?.year
   );
   renderProviderSource(company);
+  renderFinancialProfile(company?.evaluation);
   renderContacts(currentScan);
 
   elements.companyView.classList.remove("hidden");
