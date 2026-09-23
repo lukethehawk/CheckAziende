@@ -638,7 +638,7 @@ async function lookupVat(
       allowCancel: companyIsVisible,
       message: "La Partita IVA inserita non supera il controllo formale."
     });
-    return;
+    return false;
   }
 
   elements.input.value = vat;
@@ -678,6 +678,14 @@ async function lookupVat(
     manual: source === "manual"
   });
 
+  // A weak VAT found only on a generic "company/azienda" page must also
+  // agree with the current site's domain/brand. Otherwise it is very likely
+  // a third-party company shown by a directory, marketplace or data provider.
+  if (source === "automatic" && assessment.status === "unidentified") {
+    elements.button.disabled = false;
+    return false;
+  }
+
   renderCompany(company, {
     source,
     evidenceLabel:
@@ -690,6 +698,7 @@ async function lookupVat(
 
   hideManual();
   elements.button.disabled = false;
+  return true;
 }
 
 async function scanFallbackPages(tabId) {
@@ -845,7 +854,7 @@ async function inspectActivePage() {
     if (candidates.length) {
       const best = candidates[0];
 
-      await lookupVat(best.vat, {
+      const accepted = await lookupVat(best.vat, {
         source: "automatic",
         evidenceLabel: best.source
           ? `P.IVA identificata da ${best.source}`
@@ -853,7 +862,7 @@ async function inspectActivePage() {
         candidate: best
       });
 
-      return;
+      if (accepted) return;
     }
 
     const domainMatchFound = await lookupCompanyFromDomain();
