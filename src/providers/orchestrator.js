@@ -157,6 +157,11 @@ export function promoteLatestFinancialYear(financials) {
     .filter((item) => Number.isFinite(Number(item?.year)))
     .sort((a, b) => Number(b.year) - Number(a.year));
 
+  const sourceList = (item) => [
+    ...(Array.isArray(item?.sources) ? item.sources : []),
+    item?.source
+  ].filter(Boolean);
+
   const chooseLatest = (summary, field) => {
     const summaryYear = Number(summary?.year);
     const summaryValid =
@@ -174,16 +179,32 @@ export function promoteLatestFinancialYear(financials) {
       summaryValid &&
       (!latestHistory || summaryYear >= historyYear)
     ) {
+      const sameYearHistory = historyRows.find(
+        (item) => Number(item?.year) === summaryYear
+      );
+      const sources = [...new Set([
+        ...sourceList(summary),
+        ...sourceList(sameYearHistory)
+      ])];
+
       return {
+        ...summary,
         value: summary.value,
-        year: summaryYear
+        year: summaryYear,
+        source: summary?.source || sameYearHistory?.source || sources[0] || null,
+        sources,
+        isFiled: Boolean(summary?.isFiled || sameYearHistory?.isFiled)
       };
     }
 
     if (latestHistory) {
+      const sources = [...new Set(sourceList(latestHistory))];
       return {
         value: latestHistory[field],
-        year: historyYear
+        year: historyYear,
+        source: latestHistory.source || sources[0] || null,
+        sources,
+        isFiled: Boolean(latestHistory.isFiled)
       };
     }
 
@@ -199,9 +220,13 @@ export function promoteLatestFinancialYear(financials) {
   );
 
   if (matchingProfitRow) {
+    const sources = [...new Set(sourceList(matchingProfitRow))];
     result.profit = {
       value: matchingProfitRow.profit,
-      year: revenueYear
+      year: revenueYear,
+      source: matchingProfitRow.source || sources[0] || null,
+      sources,
+      isFiled: Boolean(matchingProfitRow.isFiled)
     };
   } else {
     result.profit = chooseLatest(result.profit, "profit");
