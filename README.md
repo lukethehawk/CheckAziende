@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.0`.
+Versione `0.7.1`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -85,6 +85,7 @@ I test coprono anche:
 manifest.json
 src/
   confidence.js
+  company.js
   domain.js
   scanner.js
   providers/
@@ -174,3 +175,8 @@ La versione 0.7.0 introduce un passaggio di hardening qualitativo senza modifica
 - la CI esegue anche un controllo sintattico esplicito sui moduli dell'estensione.
 
 Queste regole preparano il futuro score rosso-verde evitando di confondere dati economici osservati con bilanci effettivamente depositati.
+
+
+## Refactor 0.7.1
+
+La normalizzazione della società e l'arricchimento fra Aziende.it, RegistroAziende e Xray sono stati spostati in `src/company.js`. Il popup resta responsabile del flusso e del rendering, mentre il modello dati è ora isolato e testabile separatamente. Questo riduce il rischio di regressioni quando verranno aggiunti nuovi provider o lo score finanziario visibile.
