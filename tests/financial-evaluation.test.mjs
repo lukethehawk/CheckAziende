@@ -14,9 +14,9 @@ test("evaluation tracks the two-filed-balances requirement", () => {
       ebitda: { value: 320_000, year: 2024 },
       ebitdaMargin: { value: 16, year: 2024 },
       balanceHistory: [
-        { year: 2024, revenue: 2_000_000, profit: 230_000 },
-        { year: 2023, revenue: 1_800_000, profit: 170_000 },
-        { year: 2022, revenue: 1_700_000, profit: 160_000 }
+        { year: 2024, revenue: 2_000_000, profit: 230_000, isFiled: true },
+        { year: 2023, revenue: 1_800_000, profit: 170_000, isFiled: true },
+        { year: 2022, revenue: 1_700_000, profit: 160_000, isFiled: true }
       ]
     }
   }, {
@@ -39,9 +39,9 @@ test("ceased companies are capped to a low internal score", () => {
       ebitda: { value: 3_000_000, year: 2024 },
       ebitdaMargin: { value: 30, year: 2024 },
       balanceHistory: [
-        { year: 2024, revenue: 10_000_000, profit: 2_000_000 },
-        { year: 2023, revenue: 9_000_000, profit: 1_800_000 },
-        { year: 2022, revenue: 8_000_000, profit: 1_500_000 }
+        { year: 2024, revenue: 10_000_000, profit: 2_000_000, isFiled: true },
+        { year: 2023, revenue: 9_000_000, profit: 1_800_000, isFiled: true },
+        { year: 2022, revenue: 8_000_000, profit: 1_500_000, isFiled: true }
       ]
     }
   }, {
@@ -49,4 +49,38 @@ test("ceased companies are capped to a low internal score", () => {
   });
 
   assert.ok(result.score <= 20);
+});
+
+
+test("generic financial observations do not satisfy filed-balance requirement", () => {
+  const result = evaluateFinancialProfile({
+    status: "Attiva",
+    registrationDate: "01/01/2015",
+    financials: {
+      revenue: { value: 2_000_000, year: 2025 },
+      profit: { value: 100_000, year: 2025 },
+      balanceHistory: [
+        {
+          year: 2025,
+          revenue: 2_000_000,
+          profit: 100_000,
+          source: "Xray Finance",
+          isFiled: false
+        },
+        {
+          year: 2024,
+          revenue: 1_800_000,
+          profit: 80_000,
+          source: "Xray Finance",
+          isFiled: false
+        }
+      ]
+    }
+  });
+
+  assert.equal(result.requirements.atLeastTwoFiledBalances, false);
+  assert.equal(
+    result.factors.find((item) => item.key === "balanceHistory").value,
+    0
+  );
 });
