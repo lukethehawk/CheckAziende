@@ -410,9 +410,13 @@ export async function scanRelatedPages(urls) {
       return "note legali";
     }
     if (path.includes("contact") || path.includes("contatti")) return "pagina contatti";
-    if (path.includes("about") || path.includes("chi-siamo") || path.includes("company") || path.includes("azienda")) {
+    if (path.includes("about") || path.includes("chi-siamo")) return "pagina azienda";
+
+    const lastSegment = path.split("/").filter(Boolean).at(-1) || "";
+    if (/^(?:azienda|company|corporate)$/.test(lastSegment)) {
       return "pagina azienda";
     }
+
     if (path.includes("terms") || path.includes("termini")) return "termini del sito";
     return title || "pagina societaria";
   }
@@ -450,6 +454,8 @@ export async function scanRelatedPages(urls) {
       const label = sourceLabel(response.url || url.href, doc.title?.trim());
       checkedUrls.push(response.url || url.href);
 
+      const pageCandidates = [];
+
       VAT_NUMBER_PATTERN.lastIndex = 0;
       let match;
       while ((match = VAT_NUMBER_PATTERN.exec(text)) !== null) {
@@ -472,15 +478,22 @@ export async function scanRelatedPages(urls) {
                 ? "vat_company_page"
                 : "vat_other_labeled";
 
-        candidates.push({
+        pageCandidates.push({
           vat,
-          score: 130,
+          score: label === "pagina azienda" ? 80 : 130,
           source: label,
           evidenceType,
-          confidence: "high",
+          confidence: label === "pagina azienda" ? "medium" : "high",
           context,
           url: response.url || url.href
         });
+      }
+
+      // A company directory/listing can contain many valid VAT numbers.
+      // Such a page describes third parties and must never identify the site owner.
+      const distinctPageVats = new Set(pageCandidates.map((item) => item.vat));
+      if (distinctPageVats.size === 1) {
+        candidates.push(...pageCandidates);
       }
 
       for (const anchor of doc.querySelectorAll('a[href^="mailto:" i]')) {
