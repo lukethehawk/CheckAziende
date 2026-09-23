@@ -478,6 +478,7 @@ export async function scanRelatedPages(urls) {
   const candidates = [];
   const emails = [];
   const phones = [];
+  const ownerHints = [];
   const checkedUrls = [];
 
   for (const rawUrl of Array.isArray(urls) ? urls.slice(0, 6) : []) {
@@ -506,6 +507,30 @@ export async function scanRelatedPages(urls) {
       const text = doc.body?.innerText || doc.body?.textContent || "";
       const label = sourceLabel(response.url || url.href, doc.title?.trim());
       checkedUrls.push(response.url || url.href);
+
+      // Privacy/legal pages often identify the site owner by legal name but do
+      // not repeat its VAT number. Keep that legal name as a site-owner hint
+      // for the later domain/provider lookup.
+      if (label === "privacy policy" || label === "note legali") {
+        const ownerPatterns = [
+          /Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?\s*\n+\s*([^\n]{2,180})/i,
+          /(?:Titolare|Data\s+Controller)\s*:?\s*\n+\s*([^\n]{2,180})/i
+        ];
+
+        for (const pattern of ownerPatterns) {
+          const ownerLine = text.match(pattern)?.[1];
+          if (!ownerLine) continue;
+
+          const legalName = clean(ownerLine, 180).match(
+            /^(.+?\b(?:s\.?r\.?l\.?s?\.?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|societa\s+cooperativa|cooperativa))\b/i
+          )?.[1];
+
+          if (legalName) {
+            ownerHints.push(clean(legalName, 120));
+            break;
+          }
+        }
+      }
 
       const pageCandidates = [];
 
@@ -582,6 +607,7 @@ export async function scanRelatedPages(urls) {
       emails: unique(emails).filter((email) => email.length <= 120).slice(0, 6),
       phones: unique(phones).filter((phone) => phone.length >= 6 && phone.length <= 40).slice(0, 6)
     },
+    ownerHints: unique(ownerHints).slice(0, 6),
     checkedUrls
   };
 }
