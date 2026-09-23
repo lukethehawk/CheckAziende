@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   compareProviderData,
+  financialHistoryNeedsRefresh,
   mergeBalanceHistories,
   needsFallback,
   previousBalanceRows,
@@ -61,18 +62,20 @@ test("provider verification flags material revenue conflict", () => {
   assert.equal(result.verified, false);
 });
 
-test("complete primary provider does not require blocking fallback", () => {
+test("fresh complete primary provider does not require blocking fallback", () => {
   assert.equal(needsFallback({
     status: "Attiva",
     ateco: { code: "46.50.1" },
     financials: {
-      revenue: { value: 1_992_222, year: 2024 },
-      profit: { value: 236_014, year: 2024 },
+      revenue: { value: 1_820_000, year: 2025 },
+      profit: { value: 266_000, year: 2025 },
       balanceHistory: [
-        { year: 2024 },
-        { year: 2023 }
+        { year: 2025 },
+        { year: 2024 }
       ]
     }
+  }, {
+    now: new Date(2026, 8, 23)
   }), false);
 });
 
@@ -203,4 +206,62 @@ test("canonical value wins when providers report the same latest year", () => {
 
   assert.equal(financials.revenue.value, 1_825_000);
   assert.equal(financials.profit.value, 267_000);
+});
+
+
+test("gapped history triggers verifier refresh", () => {
+  const financials = {
+    revenue: { value: 1_992_222, year: 2024 },
+    profit: { value: 236_014, year: 2024 },
+    balanceHistory: [
+      { year: 2024, revenue: 1_992_222, profit: 236_014 },
+      { year: 2022, revenue: 1_765_110, profit: 166_073 },
+      { year: 2021, revenue: 1_930_000, profit: 150_000 }
+    ]
+  };
+
+  assert.equal(
+    financialHistoryNeedsRefresh(financials, {
+      now: new Date(2026, 8, 23)
+    }),
+    true
+  );
+});
+
+test("previous-year filing gap triggers verifier in second half of year", () => {
+  const financials = {
+    revenue: { value: 1_992_222, year: 2024 },
+    profit: { value: 236_014, year: 2024 },
+    balanceHistory: [
+      { year: 2024, revenue: 1_992_222, profit: 236_014 },
+      { year: 2023, revenue: 1_635_153, profit: 173_389 },
+      { year: 2022, revenue: 1_765_110, profit: 166_073 }
+    ]
+  };
+
+  assert.equal(
+    financialHistoryNeedsRefresh(financials, {
+      now: new Date(2026, 8, 23)
+    }),
+    true
+  );
+});
+
+test("fresh contiguous history does not trigger verifier refresh", () => {
+  const financials = {
+    revenue: { value: 1_820_000, year: 2025 },
+    profit: { value: 266_000, year: 2025 },
+    balanceHistory: [
+      { year: 2025, revenue: 1_820_000, profit: 266_000 },
+      { year: 2024, revenue: 1_992_222, profit: 236_014 },
+      { year: 2023, revenue: 1_635_153, profit: 173_389 }
+    ]
+  };
+
+  assert.equal(
+    financialHistoryNeedsRefresh(financials, {
+      now: new Date(2026, 8, 23)
+    }),
+    false
+  );
 });
