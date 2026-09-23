@@ -459,6 +459,14 @@ export function buildSlugCandidates(
     "inc",
     "ltd"
   ];
+  const territorialLegalVariants = [
+    "srl",
+    "s-r-l",
+    "societa-a-responsabilita-limitata",
+    "spa",
+    "s-p-a",
+    "societa-per-azioni"
+  ];
 
   const generic = new Set([
     "home",
@@ -514,7 +522,7 @@ export function buildSlugCandidates(
           result.push(`${qualified}-${province}`);
         }
 
-        for (const suffix of legalVariants) {
+        for (const suffix of territorialLegalVariants) {
           const candidate = `${qualified}-${suffix}`;
           result.push(candidate);
 
