@@ -140,9 +140,24 @@ function nameSlugVariants(name) {
 
   variants.add(
     raw
+      .replace(/-s-p-a$/, "-spa")
+      .replace(/-s-r-l$/, "-srl")
+      .replace(/-s-r-l-s$/, "-srls")
+  );
+
+  variants.add(
+    raw
       .replace(/-societa-per-azioni$/, "-s-p-a")
       .replace(/-societa-a-responsabilita-limitata$/, "-s-r-l")
       .replace(/-societa-a-responsabilita-limitata-semplificata$/, "-s-r-l-s")
+  );
+
+  variants.add(
+    raw
+      .replace(/-spa$/, "-societa-per-azioni")
+      .replace(/-s-p-a$/, "-societa-per-azioni")
+      .replace(/-srl$/, "-societa-a-responsabilita-limitata")
+      .replace(/-s-r-l$/, "-societa-a-responsabilita-limitata")
   );
 
   return [...variants]
