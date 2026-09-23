@@ -65,13 +65,29 @@ export function assessVatMatch({ candidate, company, pageContext, manual = false
   }
 
   const evidenceType = vatEvidenceType(candidate);
+  const comparison = compareCompanyToPage(company, pageContext);
+
+  const ownerCoherent = Boolean(
+    comparison.exactDomain ||
+    comparison.nameMatchesRoot ||
+    comparison.exactBrandHint ||
+    comparison.brandContainsName
+  );
+
+  let baseWeight = VAT_SOURCE_SCORES[evidenceType];
+
+  // JSON-LD on a directory/profile page often describes the company being
+  // viewed rather than the website owner. Treat it as strong ownership
+  // evidence only when the company is coherent with site-level brand/domain.
+  if (evidenceType === "vat_structured" && !ownerCoherent) {
+    baseWeight = 55;
+  }
+
   const evidence = [{
     type: evidenceType,
-    weight: VAT_SOURCE_SCORES[evidenceType],
+    weight: baseWeight,
     label: candidate?.source || "P.IVA rilevata dal sito"
   }];
-
-  const comparison = compareCompanyToPage(company, pageContext);
 
   if (comparison.exactDomain) {
     evidence.push({ type: "domain_exact", weight: 35, label: "Dominio aziendale coincidente" });
