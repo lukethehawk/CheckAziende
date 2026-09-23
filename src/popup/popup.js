@@ -148,6 +148,22 @@ function mergeRelatedContacts(related) {
   ]).slice(0, 6);
 }
 
+function mergeRelatedOwnerHints(related) {
+  const ownerHints = unique(related?.ownerHints || []);
+  if (!ownerHints.length) return;
+
+  currentDomainLookup = buildDomainLookupContext({
+    hostname: currentScan?.hostname || "",
+    title: currentScan?.title || "",
+    siteName: currentScan?.siteName || "",
+    brandHints: unique([
+      ...(currentScan?.brandHints || []),
+      ...(currentDomainLookup?.brandHints || []),
+      ...ownerHints
+    ])
+  });
+}
+
 function setLoading(message) {
   elements.status.textContent = message;
   elements.loadingView.classList.remove("hidden");
@@ -803,6 +819,7 @@ async function scanFallbackPages(tabId) {
 
     const related = mainFrame?.result || null;
     mergeRelatedContacts(related);
+    mergeRelatedOwnerHints(related);
     return related;
   } catch {
     return null;
