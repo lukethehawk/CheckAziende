@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildXrayNumberedSlugCandidates,
   buildXraySlugCandidates,
   parseXrayText
 } from "../src/providers/xray.js";
@@ -79,4 +80,42 @@ test("normalizes noisy VIES MPS Monitor legal name into Xray candidates", () => 
 
   assert.ok(slugs.includes("mps-monitor-srl"));
   assert.ok(slugs.includes("mps-monitor-s-r-l"));
+});
+
+
+test("builds the real Rubino Xray disambiguated slug", () => {
+  const bases = buildXraySlugCandidates(["RUBINO - S.R.L."]);
+  const numbered = buildXrayNumberedSlugCandidates(bases);
+
+  assert.ok(bases.includes("rubino-s-r-l"));
+  assert.ok(numbered.includes("rubino-s-r-l-15"));
+});
+
+test("parses Rubino Xray financial data", () => {
+  const text = `
+RUBINO S.R.L.
+Fatturato e dati di Bilancio - Giffoni Valle Piana - SA - P.IVA: 05488440651
+Partita IVA 05488440651
+ATECO 46.49.90
+Ultimo bilancio | valori in €/000 31/12/2024
+Fatturato 2024 2.278
+EBITDA 283
+Utile/Perdita 112
+Dipendenti 13
+Patrimonio Netto 999
+Posizione Finanziaria Netta 45
+EBITDA 12.41%
+`;
+
+  const company = parseXrayText(text, {
+    name: "RUBINO S.R.L.",
+    url: "https://xrayfinance.it/rubino-s-r-l-15"
+  });
+
+  assert.equal(company.vat, "05488440651");
+  assert.equal(company.financials.revenue, 2_278_000);
+  assert.equal(company.financials.ebitda, 283_000);
+  assert.equal(company.financials.profit, 112_000);
+  assert.equal(company.financials.employees, 13);
+  assert.equal(company.financials.ebitdaMargin, 12.41);
 });
