@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "CheckAziende",
+  "version": "0.1.0",
+  "description": "Rileva la Partita IVA del sito aperto e verifica i dati aziendali disponibili.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://ec.europa.eu/*"
+  ],
+  "action": {
+    "default_title": "CheckAziende",
+    "default_popup": "src/popup/popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "checkaziende@lukethehawk.github"
+    }
+  }
+}
