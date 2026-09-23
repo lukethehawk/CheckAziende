@@ -4,6 +4,9 @@ import { findRegistroAziendeCompanyByVat } from "./registroaziende.js";
 
 const FAST_BUDGET_MS = 950;
 const FALLBACK_BUDGET_MS = 650;
+const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const api = globalThis.browser ?? globalThis.chrome;
 
 function timeoutValue(promise, ms, fallback = null) {
   return Promise.race([
@@ -80,7 +83,49 @@ export function needsFallback(company) {
     history.length < 2;
 }
 
-export async function resolveCompanyProviders({
+function snapshotKey(vat) {
+  return `provider-orchestrator:v1:${vat}`;
+}
+
+async function readSnapshot(vat) {
+  try {
+    const stored = await api.storage.local.get(snapshotKey(vat));
+    const entry = stored?.[snapshotKey(vat)];
+    if (!entry) return null;
+
+    const age = Date.now() - entry.cachedAt;
+    if (age > STALE_TTL_MS) return null;
+
+    return {
+      value: entry.value,
+      age,
+      stale: age > SNAPSHOT_TTL_MS
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSnapshot(vat, result) {
+  try {
+    await api.storage.local.set({
+      [snapshotKey(vat)]: {
+        cachedAt: Date.now(),
+        value: {
+          primary: result.primary || null,
+          aziende: result.aziende || null,
+          xray: result.xray || null,
+          registro: result.registro || null,
+          verification: result.verification || null
+        }
+      }
+    });
+  } catch {
+    // Snapshot cache is optional.
+  }
+}
+
+async function resolveNetwork({
   vat,
   names = [],
   provinceHints = [],
@@ -115,7 +160,7 @@ export async function resolveCompanyProviders({
   const primary = aziende || registro || null;
   const verification = compareProviderData(primary, registro);
 
-  return {
+  const result = {
     primary,
     aziende,
     xray,
@@ -123,9 +168,49 @@ export async function resolveCompanyProviders({
     verification,
     backgroundVerification: registro
       ? null
-      : registroPromise.then((value) => ({
-          registro: value,
-          verification: compareProviderData(primary, value)
-        }))
+      : registroPromise.then(async (value) => {
+          const update = {
+            registro: value,
+            verification: compareProviderData(primary, value)
+          };
+
+          await writeSnapshot(vat, {
+            primary,
+            aziende,
+            xray,
+            registro: value,
+            verification: update.verification
+          });
+
+          return update;
+        })
+  };
+
+  await writeSnapshot(vat, result);
+  return result;
+}
+
+export async function resolveCompanyProviders(args) {
+  const vat = String(args?.vat || "").replace(/\D/g, "");
+  const cached = await readSnapshot(vat);
+
+  if (cached?.value) {
+    const backgroundRefresh = resolveNetwork(args).catch(() => null);
+
+    return {
+      ...cached.value,
+      fromCache: true,
+      stale: cached.stale,
+      backgroundVerification: null,
+      backgroundRefresh
+    };
+  }
+
+  const result = await resolveNetwork(args);
+  return {
+    ...result,
+    fromCache: false,
+    stale: false,
+    backgroundRefresh: null
   };
 }
