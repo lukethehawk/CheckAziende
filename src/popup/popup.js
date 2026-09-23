@@ -59,7 +59,7 @@ function hideCompany() {
 function renderCompany(data) {
   currentVat = data.vatNumber;
   elements.name.textContent = data.name || "Ragione sociale non restituita da VIES";
-  elements.validity.textContent = data.valid ? "P.IVA valida" : "Non valida";
+  elements.validity.textContent = data.valid ? "Presente in VIES" : "Non presente in VIES";
   elements.validity.classList.toggle("valid", data.valid);
   elements.validity.classList.toggle("invalid", !data.valid);
   elements.vat.textContent = `${data.countryCode || "IT"} ${data.vatNumber}`;
@@ -89,9 +89,11 @@ async function verifyVat(rawVat, { bypassCache = false } = {}) {
     renderCompany(result);
     elements.detectionNote.textContent = result.cached
       ? "Risultato VIES recuperato dalla cache locale."
-      : "Verifica completata tramite VIES.";
+      : result.valid
+        ? "La P.IVA risulta abilitata agli scambi intracomunitari in VIES."
+        : "La P.IVA è formalmente valida, ma non risulta abilitata in VIES.";
   } catch (error) {
-    setStatus(error?.message || "Impossibile verificare la Partita IVA.", { error: true });
+    setStatus(error?.message || "Impossibile interrogare VIES.", { error: true });
   } finally {
     elements.button.disabled = false;
   }
