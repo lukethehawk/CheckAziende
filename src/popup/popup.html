@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CheckAziende</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div>
+        <h1>CheckAziende</h1>
+        <p id="page-host" class="muted">Analisi della pagina…</p>
+      </div>
+      <span class="badge">beta</span>
+    </header>
+
+    <section class="card">
+      <label class="label" for="vat-input">Partita IVA</label>
+      <div class="vat-row">
+        <input
+          id="vat-input"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          maxlength="14"
+          placeholder="Es. 12345678901"
+        >
+        <button id="check-button" type="button">Verifica</button>
+      </div>
+      <p id="detection-note" class="hint"></p>
+    </section>
+
+    <section id="status-card" class="card status-card" aria-live="polite">
+      <div id="status" class="status">Ricerca Partita IVA nella pagina…</div>
+    </section>
+
+    <section id="company-card" class="card company-card hidden">
+      <div class="company-heading">
+        <div>
+          <p class="eyebrow">VIES</p>
+          <h2 id="company-name">Azienda</h2>
+        </div>
+        <span id="validity-badge" class="validity"></span>
+      </div>
+
+      <dl class="details">
+        <div>
+          <dt>Partita IVA</dt>
+          <dd id="company-vat">—</dd>
+        </div>
+        <div>
+          <dt>Sede</dt>
+          <dd id="company-address">—</dd>
+        </div>
+        <div>
+          <dt>Verifica</dt>
+          <dd id="request-date">—</dd>
+        </div>
+      </dl>
+
+      <div class="actions">
+        <button id="copy-button" class="secondary" type="button">Copia P.IVA</button>
+        <a id="vies-link" class="secondary link-button" href="#" target="_blank" rel="noreferrer">Apri VIES</a>
+      </div>
+    </section>
+
+    <footer class="footer">
+      La pagina viene analizzata localmente. Solo la P.IVA viene inviata a VIES per la verifica.
+    </footer>
+  </main>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
