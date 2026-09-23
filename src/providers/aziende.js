@@ -1,6 +1,6 @@
 const BASE_URL = "https://www.aziende.it";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const MAX_SLUGS = 16;
+const MAX_SLUGS = 28;
 const api = globalThis.browser ?? globalThis.chrome;
 
 function clean(value) {
@@ -224,7 +224,6 @@ function stripDescriptor(value) {
 
 export function buildSlugCandidates(names) {
   const legalVariants = [
-    "",
     "srl",
     "s-r-l",
     "srl-a-socio-unico",
@@ -239,25 +238,39 @@ export function buildSlugCandidates(names) {
     "ltd"
   ];
 
-  const result = [];
+  const generic = new Set([
+    "home",
+    "homepage",
+    "login",
+    "welcome",
+    "benvenuti",
+    "area-clienti",
+    "customer-area"
+  ]);
+
+  const bases = [];
 
   for (const raw of unique(names)) {
-    const candidates = unique([
-      clean(raw),
-      stripDescriptor(raw)
-    ]);
-
-    for (const candidate of candidates) {
+    for (const candidate of unique([clean(raw), stripDescriptor(raw)])) {
       const slug = slugifyCompanyName(candidate);
-      if (!slug || slug.length < 3) continue;
+      if (!slug || slug.length < 3 || generic.has(slug)) continue;
+      bases.push(slug);
+    }
+  }
 
-      result.push(slug);
+  const uniqueBases = unique(bases);
+  const result = [...uniqueBases];
 
-      const hasLegalSuffix = /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd)(?:$|-)/.test(slug);
+  for (const suffix of legalVariants) {
+    for (const slug of uniqueBases) {
+      const hasLegalSuffix =
+        /(?:^|-)(?:srl|s-r-l|spa|s-p-a|srls|s-r-l-s|snc|sas|inc|ltd)(?:$|-)/.test(slug);
+
       if (hasLegalSuffix) continue;
+      result.push(`${slug}-${suffix}`);
 
-      for (const suffix of legalVariants.slice(1)) {
-        result.push(`${slug}-${suffix}`);
+      if (result.length >= MAX_SLUGS) {
+        return unique(result).slice(0, MAX_SLUGS);
       }
     }
   }
