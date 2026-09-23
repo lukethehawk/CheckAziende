@@ -810,12 +810,19 @@ async function scanFallbackPages(tabId) {
 }
 
 function providerCandidateNames() {
+  const hasThirdPartyProfileCandidate = Boolean(
+    currentScan?.candidates?.some((candidate) =>
+      ["vat_structured", "vat_metadata", "vat_company_page"]
+        .includes(candidate?.evidenceType)
+    )
+  );
+
   return unique([
     ...(currentDomainLookup?.brandHints || []),
     ...(currentDomainLookup?.searchNames || []),
     currentDomainLookup?.rootLabel,
     currentScan?.siteName,
-    currentScan?.title
+    hasThirdPartyProfileCandidate ? null : currentScan?.title
   ]);
 }
 
