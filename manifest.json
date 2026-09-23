@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CheckAziende",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Rileva la Partita IVA del sito aperto e verifica i dati aziendali disponibili.",
   "permissions": [
     "activeTab",
