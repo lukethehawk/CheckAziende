@@ -538,3 +538,11 @@ input:focus {
 .balance-history-section[open] .balance-history {
   margin-bottom: 4px;
 }
+
+.financial-positive {
+  color: #23824a !important;
+}
+
+.financial-negative {
+  color: #c13b3b !important;
+}
