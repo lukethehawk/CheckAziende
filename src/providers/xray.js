@@ -229,7 +229,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchSlug(slug) {
-  const key = `xray:v1:slug:${slug}`;
+  const key = `xray:v2:slug:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
@@ -246,7 +246,11 @@ async function fetchSlug(slug) {
     });
 
     if (!response.ok) {
-      await writeCache(key, null);
+      // Cache only permanent misses. Transient failures (429/5xx, bot
+      // challenges, etc.) must not poison the provider for 24 hours.
+      if (response.status === 404) {
+        await writeCache(key, null);
+      }
       return null;
     }
 
@@ -256,7 +260,10 @@ async function fetchSlug(slug) {
     const html = await response.text();
     const company = parseXrayPage(html, response.url || url);
 
-    await writeCache(key, company || null);
+    if (company) {
+      await writeCache(key, company);
+    }
+
     return company || null;
   } catch {
     return null;
@@ -274,6 +281,21 @@ async function firstVatMatch(slugs, vat) {
   return null;
 }
 
+export function buildXrayNumberedSlugCandidates(
+  bases,
+  { maxBases = 3, maxSuffix = 18 } = {}
+) {
+  const numbered = [];
+
+  for (const base of (bases || []).slice(0, maxBases)) {
+    for (let suffix = 1; suffix <= maxSuffix; suffix += 1) {
+      numbered.push(`${base}-${suffix}`);
+    }
+  }
+
+  return numbered;
+}
+
 export async function findXrayCompanyByVat(vat, { names = [] } = {}) {
   const targetVat = String(vat || "").replace(/\D/g, "");
   if (!/^\d{11}$/.test(targetVat)) return null;
@@ -286,12 +308,7 @@ export async function findXrayCompanyByVat(vat, { names = [] } = {}) {
 
   // Xray disambiguates homonyms with numeric suffixes (e.g. name-2, name-8).
   // Only enumerate suffixes after direct candidates fail, and always validate VAT.
-  const numbered = [];
-  for (const base of bases.slice(0, 3)) {
-    for (let suffix = 1; suffix <= 18; suffix += 1) {
-      numbered.push(`${base}-${suffix}`);
-    }
-  }
+  const numbered = buildXrayNumberedSlugCandidates(bases);
 
   return firstVatMatch(numbered, targetVat);
 }

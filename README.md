@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.3`.
+Versione `0.7.4`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -185,3 +185,8 @@ La normalizzazione della società e l'arricchimento fra Aziende.it, RegistroAzie
 ## UI 0.7.3
 
 Quando una scheda azienda è già visibile ma uno o più provider stanno ancora completando i dati, compare in alto una piccola riga `Completamento dati in corso…`. L'indicatore appare solo se il caricamento in background dura più di circa 350 ms e scompare automaticamente quando le richieste pendenti terminano. La logica di identificazione, merge e priorità dei provider non viene modificata.
+
+
+## Fix Xray 0.7.4
+
+Il provider Xray non memorizza più per 24 ore errori HTTP temporanei come risultati negativi. La cache Xray è stata invalidata e il caso reale `rubino-s-r-l-15` è coperto da test di regressione. Inoltre, quando una pagina profilo descrive una società terza, il titolo della pagina non viene usato per identificare il proprietario del sito nel fallback per dominio.
