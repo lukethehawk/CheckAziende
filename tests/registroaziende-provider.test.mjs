@@ -99,3 +99,14 @@ Anno Fatturato Utile/Perdita
   assert.equal(company.financials.balanceHistory[2].revenue, 4_192_298);
   assert.equal(company.financials.balanceHistory[2].profit, 548_583);
 });
+
+
+test("builds Xray Finance owner slug from privacy name and city", () => {
+  const slugs = buildRegistroSlugCandidates(
+    ["Xray Finance Srl"],
+    ["Bolzano"]
+  );
+
+  assert.ok(slugs.includes("xray-finance-srl-bolzano"));
+  assert.ok(slugs.indexOf("xray-finance-srl-bolzano") < 3);
+});

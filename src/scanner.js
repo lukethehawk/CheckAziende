@@ -462,7 +462,31 @@ export async function scanRelatedPages(urls) {
   }
 
   function extractOwnerHints(doc, text) {
-    const hints = [];
+    const names = [];
+    const cities = [];
+
+    const addOwnerLine = (value) => {
+      const source = clean(value || "", 240);
+      const legalName = extractLegalEntityName(source);
+      if (!legalName) return false;
+
+      names.push(legalName);
+
+      const legalIndex = source.toLowerCase().indexOf(legalName.toLowerCase());
+      const tail = legalIndex >= 0
+        ? source.slice(legalIndex + legalName.length)
+        : source;
+
+      const cityMatch = tail.match(
+        /\b\d{1,5}\s+([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ' .-]{1,58})$/
+      );
+
+      if (cityMatch?.[1]) {
+        cities.push(clean(cityMatch[1], 60));
+      }
+
+      return true;
+    };
 
     const headings = [
       ...doc.querySelectorAll("h1, h2, h3, h4, h5, h6, strong, b")
@@ -476,27 +500,25 @@ export async function scanRelatedPages(urls) {
 
       let sibling = heading.nextElementSibling;
       for (let i = 0; sibling && i < 3; i += 1, sibling = sibling.nextElementSibling) {
-        const legalName = extractLegalEntityName(sibling.textContent || "");
-        if (legalName) {
-          hints.push(legalName);
-          break;
-        }
+        if (addOwnerLine(sibling.textContent || "")) break;
       }
 
-      if (hints.length) break;
+      if (names.length) break;
     }
 
-    if (!hints.length) {
+    if (!names.length) {
       const flattened = String(text || "").replace(/\s+/g, " ").trim();
       const ownerMatch = flattened.match(
-        /(?:Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?|Data\s+Controller)\s*:?[\s-]+(.{2,180}?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa))(?=\s|[-,;|]|$)/i
+        /(?:Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?|Data\s+Controller)\s*:?\s*(.{2,220}?\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa)(?:.{0,100})?)(?=Indirizzo\s+email|Tipologie\s+di\s+Dati|$)/i
       );
 
-      const legalName = extractLegalEntityName(ownerMatch?.[1] || "");
-      if (legalName) hints.push(legalName);
+      addOwnerLine(ownerMatch?.[1] || "");
     }
 
-    return unique(hints).slice(0, 4);
+    return {
+      names: unique(names).slice(0, 4),
+      cities: unique(cities).slice(0, 4)
+    };
   }
 
   function sourceLabel(url, title) {
@@ -528,6 +550,7 @@ export async function scanRelatedPages(urls) {
   const emails = [];
   const phones = [];
   const ownerHints = [];
+  const ownerCityHints = [];
   const checkedUrls = [];
 
   for (const rawUrl of Array.isArray(urls) ? urls.slice(0, 6) : []) {
@@ -561,7 +584,9 @@ export async function scanRelatedPages(urls) {
       // not repeat its VAT number. Prefer the document structure because
       // DOMParser can flatten line breaks and make text-only patterns brittle.
       if (label === "privacy policy" || label === "note legali") {
-        ownerHints.push(...extractOwnerHints(doc, text));
+        const owner = extractOwnerHints(doc, text);
+        ownerHints.push(...owner.names);
+        ownerCityHints.push(...owner.cities);
       }
 
       const pageCandidates = [];
@@ -640,6 +665,7 @@ export async function scanRelatedPages(urls) {
       phones: unique(phones).filter((phone) => phone.length >= 6 && phone.length <= 40).slice(0, 6)
     },
     ownerHints: unique(ownerHints).slice(0, 6),
+    ownerCityHints: unique(ownerCityHints).slice(0, 6),
     checkedUrls
   };
 }

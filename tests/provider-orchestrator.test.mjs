@@ -5,6 +5,7 @@ import {
   compareProviderData,
   financialHistoryNeedsRefresh,
   mergeBalanceHistories,
+  missingProviderRefreshPlan,
   needsFallback,
   previousBalanceRows,
   promoteLatestFinancialYear,
@@ -316,4 +317,63 @@ test("promoted headline keeps source and filed metadata", () => {
   assert.equal(financials.revenue.source, "RegistroAziende.it");
   assert.equal(financials.revenue.isFiled, true);
   assert.equal(financials.profit.source, "RegistroAziende.it");
+});
+
+
+test("fresh cached snapshot retries missing Xray without full refresh", () => {
+  const plan = missingProviderRefreshPlan({
+    primary: {
+      provider: "Aziende.it",
+      vat: "05488440651",
+      name: "RUBINO - S.R.L.",
+      status: "Attiva",
+      ateco: { code: "46.49.9" },
+      financials: {
+        revenue: { value: 2_277_793, year: 2024 },
+        profit: { value: 111_548, year: 2024 },
+        balanceHistory: [
+          { year: 2024 },
+          { year: 2023 },
+          { year: 2022 }
+        ]
+      }
+    },
+    aziende: {
+      provider: "Aziende.it",
+      vat: "05488440651",
+      status: "Attiva",
+      ateco: { code: "46.49.9" },
+      financials: {
+        revenue: { value: 2_277_793, year: 2024 },
+        profit: { value: 111_548, year: 2024 },
+        balanceHistory: [
+          { year: 2024 },
+          { year: 2023 },
+          { year: 2022 }
+        ]
+      }
+    },
+    xray: null,
+    registro: null
+  });
+
+  assert.equal(plan.xray, true);
+  assert.equal(plan.aziende, false);
+});
+
+test("complete cached snapshot does not retry already present Xray", () => {
+  const plan = missingProviderRefreshPlan({
+    primary: {
+      vat: "05488440651"
+    },
+    aziende: {
+      vat: "05488440651"
+    },
+    xray: {
+      provider: "Xray Finance",
+      vat: "05488440651"
+    }
+  });
+
+  assert.equal(plan.xray, false);
 });

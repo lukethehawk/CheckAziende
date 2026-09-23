@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.7.9`.
+Versione `0.7.10`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -215,3 +215,8 @@ Quando l'estensione è aperta su un sottodominio applicativo e non trova una P.I
 ## Privacy owner fallback 0.7.9
 
 Il fallback Privacy/Legal estrae ora la ragione sociale del titolare usando prima la struttura HTML (intestazione `Titolare del Trattamento dei Dati` + contenuto successivo), con regex testuale come fallback. Questo evita i falsi negativi quando `DOMParser` appiattisce i ritorni a capo, come sulle schede Xray Finance. Inoltre i tentativi automatici di P.IVA non popolano più il campo di ricerca manuale, che viene svuotato nello stato `Non identificata`.
+
+
+## Provider recovery 0.7.10
+
+Gli snapshot freschi ma incompleti non congelano più per 24 ore i provider mancanti: se Xray Finance non era pronto al primo caricamento, viene ritentato in background alle aperture successive mantenendo il render immediato dalla cache. Il fallback per dominio usa ora anche RegistroAziende come sorgente di discovery, utile quando Privacy/Legal identifica il titolare per nome ma Aziende.it non espone la società. Le pagine Privacy/Legal possono inoltre fornire un hint di città dal blocco del titolare, ad esempio `Xray Finance Srl - ... Bolzano`, così RegistroAziende può risolvere lo slug corretto.
