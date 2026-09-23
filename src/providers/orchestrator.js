@@ -79,43 +79,58 @@ export function selectCanonicalPrimary(aziende, registro) {
 export function mergeBalanceHistories(primaryHistory, fallbackHistory) {
   const byYear = new Map();
 
-  const add = (item, preferExisting) => {
+  const sourceList = (item) => [
+    ...(Array.isArray(item?.sources) ? item.sources : []),
+    item?.source
+  ].filter(Boolean);
+
+  const addPrimary = (item) => {
+    const year = Number(item?.year);
+    if (!Number.isFinite(year)) return;
+
+    const sources = [...new Set(sourceList(item))];
+    byYear.set(year, {
+      ...item,
+      year,
+      sources,
+      source: item?.source || sources[0] || null,
+      isFiled: Boolean(item?.isFiled)
+    });
+  };
+
+  const addFallback = (item) => {
     const year = Number(item?.year);
     if (!Number.isFinite(year)) return;
 
     const existing = byYear.get(year);
-
     if (!existing) {
-      byYear.set(year, { ...item, year });
+      addPrimary(item);
       return;
     }
 
-    if (preferExisting) {
-      byYear.set(year, {
-        ...item,
-        ...Object.fromEntries(
-          Object.entries(existing).filter(([, value]) => value !== null && value !== undefined)
-        ),
-        year
-      });
-      return;
-    }
+    const sources = [...new Set([
+      ...sourceList(existing),
+      ...sourceList(item)
+    ])];
 
     byYear.set(year, {
-      ...existing,
+      ...item,
       ...Object.fromEntries(
-        Object.entries(item).filter(([, value]) => value !== null && value !== undefined)
+        Object.entries(existing).filter(([, value]) => value !== null && value !== undefined)
       ),
-      year
+      year,
+      sources,
+      source: existing.source || item?.source || sources[0] || null,
+      isFiled: Boolean(existing.isFiled || item?.isFiled)
     });
   };
 
   for (const item of Array.isArray(primaryHistory) ? primaryHistory : []) {
-    add(item, false);
+    addPrimary(item);
   }
 
   for (const item of Array.isArray(fallbackHistory) ? fallbackHistory : []) {
-    add(item, true);
+    addFallback(item);
   }
 
   return [...byYear.values()].sort((a, b) => b.year - a.year);
@@ -522,7 +537,9 @@ export async function resolveCompanyProviders(args) {
   const cached = await readSnapshot(vat);
 
   if (cached?.value) {
-    const backgroundRefresh = resolveNetwork(args).catch(() => null);
+    const backgroundRefresh = cached.stale
+      ? resolveNetwork(args).catch(() => null)
+      : null;
 
     return {
       ...cached.value,
