@@ -596,6 +596,17 @@ function renderFinancialProfile(evaluation) {
     }
   }
 
+  const hasFinancialSignals =
+    (Number.isFinite(observedYears) && observedYears > 0) ||
+    Number.isFinite(evaluation.metrics?.ebitdaMargin) ||
+    Number.isFinite(evaluation.metrics?.netMargin) ||
+    Number.isFinite(evaluation.metrics?.revenueTrend);
+
+  if (!hasFinancialSignals) {
+    elements.financialProfileSection.classList.add("hidden");
+    return;
+  }
+
   elements.financialProfileLabel.textContent = description.label;
   elements.financialProfileLabel.className =
     `financial-profile-label profile-${description.key}`;
