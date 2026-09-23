@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CheckAziende",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Identifica l'azienda del sito aperto e raccoglie dati societari da fonti pubbliche.",
   "permissions": [
     "activeTab",
