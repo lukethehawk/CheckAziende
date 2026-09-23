@@ -184,3 +184,41 @@ export function evaluateFinancialProfile(company, { now = new Date() } = {}) {
     completeness: Math.round((availableSignals / 6) * 100)
   };
 }
+
+
+export function describeFinancialProfile(evaluation) {
+  const score = Number(evaluation?.score);
+  const completeness = Number(evaluation?.completeness);
+  const hasFiledHistory =
+    evaluation?.requirements?.atLeastTwoFiledBalances === true;
+
+  if (
+    !Number.isFinite(score) ||
+    !Number.isFinite(completeness) ||
+    completeness < 50 ||
+    !hasFiledHistory
+  ) {
+    return {
+      key: "limited",
+      label: "Dati limitati"
+    };
+  }
+
+  if (score >= 80) {
+    return { key: "solid", label: "Solido" };
+  }
+
+  if (score >= 65) {
+    return { key: "good", label: "Buono" };
+  }
+
+  if (score >= 50) {
+    return { key: "intermediate", label: "Intermedio" };
+  }
+
+  if (score >= 35) {
+    return { key: "fragile", label: "Fragile" };
+  }
+
+  return { key: "weak", label: "Debole" };
+}
