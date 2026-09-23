@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   compareProviderData,
+  mergeBalanceHistories,
   needsFallback,
+  previousBalanceRows,
   selectCanonicalPrimary
 } from "../src/providers/orchestrator.js";
 
@@ -108,4 +110,40 @@ test("RegistroAziende is used only when canonical Aziende.it is unavailable", ()
   };
 
   assert.equal(selectCanonicalPrimary(null, registro), registro);
+});
+
+
+test("merges balance years from canonical and fallback providers", () => {
+  const merged = mergeBalanceHistories(
+    [
+      { year: 2024, revenue: 1_992_222, profit: 236_014 },
+      { year: 2022, revenue: 1_765_110, profit: 166_073 },
+      { year: 2021, revenue: 1_930_000, profit: null }
+    ],
+    [
+      { year: 2024, revenue: 1_990_000, profit: 236_010 },
+      { year: 2023, revenue: 1_635_153, profit: 173_389 },
+      { year: 2022, revenue: 1_760_000, profit: 166_000 }
+    ]
+  );
+
+  assert.deepEqual(merged.map((item) => item.year), [2024, 2023, 2022, 2021]);
+  assert.equal(merged[0].revenue, 1_992_222);
+  assert.equal(merged[2].revenue, 1_765_110);
+  assert.equal(merged[1].revenue, 1_635_153);
+});
+
+test("history accordion excludes the current headline year", () => {
+  const rows = previousBalanceRows(
+    [
+      { year: 2024, revenue: 1_992_222 },
+      { year: 2023, revenue: 1_635_153 },
+      { year: 2022, revenue: 1_765_110 },
+      { year: 2021, revenue: 1_930_000 }
+    ],
+    2024,
+    3
+  );
+
+  assert.deepEqual(rows.map((item) => item.year), [2023, 2022, 2021]);
 });

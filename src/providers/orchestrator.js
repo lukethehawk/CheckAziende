@@ -76,6 +76,60 @@ export function selectCanonicalPrimary(aziende, registro) {
   return aziende || registro || null;
 }
 
+export function mergeBalanceHistories(primaryHistory, fallbackHistory) {
+  const byYear = new Map();
+
+  const add = (item, preferExisting) => {
+    const year = Number(item?.year);
+    if (!Number.isFinite(year)) return;
+
+    const existing = byYear.get(year);
+
+    if (!existing) {
+      byYear.set(year, { ...item, year });
+      return;
+    }
+
+    if (preferExisting) {
+      byYear.set(year, {
+        ...item,
+        ...Object.fromEntries(
+          Object.entries(existing).filter(([, value]) => value !== null && value !== undefined)
+        ),
+        year
+      });
+      return;
+    }
+
+    byYear.set(year, {
+      ...existing,
+      ...Object.fromEntries(
+        Object.entries(item).filter(([, value]) => value !== null && value !== undefined)
+      ),
+      year
+    });
+  };
+
+  for (const item of Array.isArray(primaryHistory) ? primaryHistory : []) {
+    add(item, false);
+  }
+
+  for (const item of Array.isArray(fallbackHistory) ? fallbackHistory : []) {
+    add(item, true);
+  }
+
+  return [...byYear.values()].sort((a, b) => b.year - a.year);
+}
+
+export function previousBalanceRows(history, currentYear, limit = 3) {
+  const year = Number(currentYear);
+
+  return (Array.isArray(history) ? history : [])
+    .filter((item) => Number(item?.year) !== year)
+    .sort((a, b) => Number(b?.year || 0) - Number(a?.year || 0))
+    .slice(0, limit);
+}
+
 export function needsFallback(company) {
   if (!company) return true;
 
