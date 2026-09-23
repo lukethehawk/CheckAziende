@@ -317,7 +317,7 @@ export function needsFallback(company, options = {}) {
 }
 
 function snapshotKey(vat) {
-  return `provider-orchestrator:v5:${vat}`;
+  return `provider-orchestrator:v6:${vat}`;
 }
 
 async function readSnapshot(vat) {
@@ -433,15 +433,19 @@ async function resolveNetwork({
   }
 
   let xray = xrayFast;
+  let canonicalXrayPromise = null;
 
   // Xray matching is much more reliable once the canonical company name is
-  // known. Retry cheaply with the Aziende.it name if the speculative lookup
-  // did not resolve.
+  // known. Keep the canonical retry promise alive after the short UI budget
+  // so the background updater can reuse the same lookup instead of waiting
+  // for a noisier speculative search to finish first.
   if (!xray && aziendeFast?.name) {
+    canonicalXrayPromise = findXrayCompanyByVat(vat, {
+      names: [aziendeFast.name, ...names]
+    }).catch(() => null);
+
     xray = await timeoutValue(
-      findXrayCompanyByVat(vat, {
-        names: [aziendeFast.name, ...names]
-      }),
+      canonicalXrayPromise,
       ENRICHMENT_BUDGET_MS
     );
   }
@@ -483,7 +487,23 @@ async function resolveNetwork({
 
   const backgroundXray = xray
     ? null
-    : initialXrayPromise.then(async (initial) => {
+    : (async () => {
+        if (canonicalXrayPromise) {
+          const canonical = await canonicalXrayPromise;
+
+          if (canonical) {
+            await writeSnapshot(vat, {
+              primary,
+              aziende: aziendeFast,
+              xray: canonical,
+              registro,
+              verification
+            });
+            return canonical;
+          }
+        }
+
+        const initial = await initialXrayPromise;
         if (initial) {
           await writeSnapshot(vat, {
             primary,
@@ -513,7 +533,7 @@ async function resolveNetwork({
         }
 
         return retry;
-      });
+      })();
 
   const backgroundVerification = registro
     ? null
