@@ -131,6 +131,24 @@ function nameSlugVariants(name) {
 
   const variants = new Set([raw]);
 
+  const srlMatch = raw.match(
+    /^(.*?)-(?:srl|s-r-l|societa-a-responsabilita-limitata)(?:-|$)/
+  );
+  if (srlMatch?.[1]) {
+    variants.add(`${srlMatch[1]}-srl`);
+    variants.add(`${srlMatch[1]}-s-r-l`);
+    variants.add(`${srlMatch[1]}-societa-a-responsabilita-limitata`);
+  }
+
+  const spaMatch = raw.match(
+    /^(.*?)-(?:spa|s-p-a|societa-per-azioni)(?:-|$)/
+  );
+  if (spaMatch?.[1]) {
+    variants.add(`${spaMatch[1]}-spa`);
+    variants.add(`${spaMatch[1]}-s-p-a`);
+    variants.add(`${spaMatch[1]}-societa-per-azioni`);
+  }
+
   variants.add(
     raw
       .replace(/-spa$/, "-s-p-a")
