@@ -140,23 +140,19 @@ export function scanCurrentPage() {
   }
 
   function discoverRelatedUrls() {
-    const keywords = [
-      "privacy",
-      "privacy-policy",
-      "legal",
-      "legal-notices",
-      "note-legali",
-      "contatti",
-      "contact",
-      "contacts",
-      "chi-siamo",
-      "about",
-      "azienda",
-      "company",
-      "corporate",
-      "terms",
-      "termini",
-      "impressum"
+    const strongPatterns = [
+      /privacy/i,
+      /privacy-policy/i,
+      /legal/i,
+      /legal-notices/i,
+      /note-legali/i,
+      /contatti/i,
+      /contact(?:s)?/i,
+      /chi-siamo/i,
+      /about(?:-us)?/i,
+      /terms/i,
+      /termini/i,
+      /impressum/i
     ];
 
     const scored = [];
@@ -176,16 +172,34 @@ export function scanCurrentPage() {
       if (!["http:", "https:"].includes(url.protocol)) continue;
 
       url.hash = "";
-      const haystack = `${url.pathname} ${anchor.textContent || ""}`.toLowerCase();
+
+      const path = url.pathname.toLowerCase();
+      const anchorText = clean(anchor.textContent || "", 120).toLowerCase();
+      const haystack = `${path} ${anchorText}`;
 
       let score = 0;
-      for (const keyword of keywords) {
-        if (haystack.includes(keyword)) score += 10;
+
+      for (const pattern of strongPatterns) {
+        if (pattern.test(haystack)) score += 20;
       }
 
-      if (/privacy|legal|note-legali|impressum/.test(haystack)) score += 25;
-      if (/contatti|contact/.test(haystack)) score += 20;
-      if (/chi-siamo|about|azienda|company|corporate/.test(haystack)) score += 10;
+      if (/privacy|legal|note-legali|impressum/.test(haystack)) score += 30;
+      if (/contatti|contact/.test(haystack)) score += 25;
+      if (/chi-siamo|about(?:-us)?/.test(haystack)) score += 20;
+
+      // Generic "azienda/company/corporate" pages are useful on a normal
+      // corporate site, but dangerous on directories and data providers.
+      // Accept them only when both path and anchor are clearly the site's own
+      // corporate page, not when the word merely appears inside a longer URL
+      // such as /confronto-aziende or /elenco-aziende.
+      const pathSegments = path.split("/").filter(Boolean);
+      const lastSegment = pathSegments.at(-1) || "";
+      const exactCorporatePath = /^(?:azienda|company|corporate)$/.test(lastSegment);
+      const exactCorporateAnchor = /^(?:azienda|company|corporate)$/.test(anchorText);
+
+      if (exactCorporatePath && exactCorporateAnchor) {
+        score += 12;
+      }
 
       if (score > 0) scored.push({ url: url.href, score });
     }
