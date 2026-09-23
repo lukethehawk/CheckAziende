@@ -1,9 +1,10 @@
 {
   "name": "checkaziende",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "syntax": "node --check src/scanner.js && node --check src/domain.js && node --check src/confidence.js && node --check src/financial-evaluation.js && node --check src/providers/vies.js && node --check src/providers/aziende.js && node --check src/providers/xray.js && node --check src/providers/registroaziende.js && node --check src/providers/orchestrator.js && node --check src/popup/popup.js",
     "test": "node --test"
   }
 }
