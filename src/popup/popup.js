@@ -325,6 +325,18 @@ function normalizeCompany(providerData, viesData, fallbackVat) {
 function enrichCompanyWithXray(company, xray) {
   if (!xray?.financials) return company;
 
+  const hadPrimaryProvider = Boolean(company.providers?.length);
+
+  // If the registry providers did not resolve, Xray is still VAT-validated and
+  // is preferable to a noisy VIES legal name (e.g. duplicated legal suffixes).
+  if (!hadPrimaryProvider && xray.name) {
+    company.name = xray.name;
+  }
+
+  if ((!company.ateco?.code && !company.ateco?.description) && xray.ateco) {
+    company.ateco = xray.ateco;
+  }
+
   const financials = company.financials || {};
   const year = xray.financials.year || null;
 
@@ -350,7 +362,10 @@ function enrichCompanyWithXray(company, xray) {
     financials.profit = { value: xray.financials.profit, year };
   }
 
-  if (!financials.employees && Number.isFinite(xray.financials.employees)) {
+  if (
+    (!financials.employees || typeof financials.employees !== "object") &&
+    Number.isFinite(xray.financials.employees)
+  ) {
     financials.employees = {
       value: xray.financials.employees,
       display: String(xray.financials.employees),
@@ -785,33 +800,50 @@ async function lookupVat(
   const stillShowingVat = () =>
     companyIsVisible && digitsOnly(elements.vat.textContent) === vat;
 
-  if (resolved.backgroundVerification) {
-    resolved.backgroundVerification.then((update) => {
-      if (!update?.registro || !stillShowingVat()) return;
+  const attachProviderUpdates = (providerResult) => {
+    if (!providerResult) return;
 
-      renderResolved({
-        ...resolved,
-        registro: update.registro,
-        verification: update.verification
+    if (providerResult.backgroundCanonical) {
+      providerResult.backgroundCanonical.then((update) => {
+        if (!update || !stillShowingVat()) return;
+        renderResolved({
+          ...providerResult,
+          ...update,
+          primary: update.aziende || update.primary
+        });
       });
-    });
-  }
+    }
+
+    if (providerResult.backgroundXray) {
+      providerResult.backgroundXray.then((xray) => {
+        if (!xray || !stillShowingVat()) return;
+        renderResolved({
+          ...providerResult,
+          xray
+        });
+      });
+    }
+
+    if (providerResult.backgroundVerification) {
+      providerResult.backgroundVerification.then((update) => {
+        if (!update?.registro || !stillShowingVat()) return;
+
+        renderResolved({
+          ...providerResult,
+          registro: update.registro,
+          verification: update.verification
+        });
+      });
+    }
+  };
+
+  attachProviderUpdates(resolved);
 
   if (resolved.backgroundRefresh) {
     resolved.backgroundRefresh.then((fresh) => {
       if (!fresh || !stillShowingVat()) return;
       renderResolved(fresh);
-
-      if (fresh.backgroundVerification) {
-        fresh.backgroundVerification.then((update) => {
-          if (!update?.registro || !stillShowingVat()) return;
-          renderResolved({
-            ...fresh,
-            registro: update.registro,
-            verification: update.verification
-          });
-        });
-      }
+      attachProviderUpdates(fresh);
     });
   }
 

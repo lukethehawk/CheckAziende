@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   compareProviderData,
-  needsFallback
+  needsFallback,
+  selectCanonicalPrimary
 } from "../src/providers/orchestrator.js";
 
 test("provider verification accepts matching financial data", () => {
@@ -82,4 +83,29 @@ test("missing balance history triggers fallback", () => {
       balanceHistory: []
     }
   }), true);
+});
+
+
+test("Aziende.it remains canonical when RegistroAziende is also available", () => {
+  const aziende = {
+    provider: "Aziende.it",
+    vat: "11295150152",
+    rea: "MI-1453877",
+    pec: "futuretech@pec.example"
+  };
+  const registro = {
+    provider: "RegistroAziende.it",
+    vat: "11295150152"
+  };
+
+  assert.equal(selectCanonicalPrimary(aziende, registro), aziende);
+});
+
+test("RegistroAziende is used only when canonical Aziende.it is unavailable", () => {
+  const registro = {
+    provider: "RegistroAziende.it",
+    vat: "11295150152"
+  };
+
+  assert.equal(selectCanonicalPrimary(null, registro), registro);
 });
