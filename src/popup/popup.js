@@ -401,7 +401,9 @@ function enrichCompanyWithXray(company, xray) {
           : null,
         profit: Number.isFinite(xray.financials.profit)
           ? xray.financials.profit
-          : null
+          : null,
+        source: "Xray Finance",
+        isFiled: false
       }]
     );
   }
