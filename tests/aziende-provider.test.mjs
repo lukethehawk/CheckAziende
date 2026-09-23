@@ -206,3 +206,24 @@ Appalti pubblici
   assert.equal(company.financials.balanceHistory[1].revenue, 1987208400);
   assert.equal(company.financials.balanceHistory[2].profit, 41154978);
 });
+
+
+test("builds Aziende.it full legal-form slug for Poste Italiane", () => {
+  const slugs = buildSlugCandidates(
+    ["POSTE ITALIANE SPA"],
+    { provinceHints: ["RM"] }
+  );
+
+  assert.ok(slugs.includes("poste-italiane-societa-per-azioni"));
+  assert.ok(slugs.includes("poste-italiane-societa-per-azioni-RM"));
+});
+
+test("builds province-disambiguated slug for Rubino", () => {
+  const slugs = buildSlugCandidates(
+    ["RUBINO - S.R.L."],
+    { provinceHints: ["SA"] }
+  );
+
+  assert.ok(slugs.includes("rubino-s-r-l-SA"));
+  assert.ok(slugs.indexOf("rubino-s-r-l-SA") < 10);
+});
