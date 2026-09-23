@@ -1,26 +1,51 @@
-import { checkItalianVatOnVies, viesUrl } from "../providers/vies.js";
+import { checkItalianVatOnVies } from "../providers/vies.js";
 import { scanCurrentPage } from "../scanner.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
 const elements = {
   host: document.querySelector("#page-host"),
-  input: document.querySelector("#vat-input"),
-  button: document.querySelector("#check-button"),
-  detectionNote: document.querySelector("#detection-note"),
-  statusCard: document.querySelector("#status-card"),
+  loadingView: document.querySelector("#loading-view"),
   status: document.querySelector("#status"),
-  companyCard: document.querySelector("#company-card"),
+  companyView: document.querySelector("#company-view"),
+  identityBadge: document.querySelector("#identity-badge"),
   name: document.querySelector("#company-name"),
-  validity: document.querySelector("#validity-badge"),
+  location: document.querySelector("#company-location"),
   vat: document.querySelector("#company-vat"),
   address: document.querySelector("#company-address"),
-  requestDate: document.querySelector("#request-date"),
-  copyButton: document.querySelector("#copy-button"),
-  viesLink: document.querySelector("#vies-link")
+  addressRow: document.querySelector("#address-row"),
+  contactsSection: document.querySelector("#contacts-section"),
+  emailCard: document.querySelector("#email-card"),
+  email: document.querySelector("#company-email"),
+  copyEmail: document.querySelector("#copy-email"),
+  phoneCard: document.querySelector("#phone-card"),
+  phone: document.querySelector("#company-phone"),
+  copyPhone: document.querySelector("#copy-phone"),
+  website: document.querySelector("#company-website"),
+  sourceStatus: document.querySelector("#source-status"),
+  showManual: document.querySelector("#show-manual"),
+  manualPanel: document.querySelector("#manual-panel"),
+  manualDescription: document.querySelector("#manual-description"),
+  cancelManual: document.querySelector("#cancel-manual"),
+  input: document.querySelector("#vat-input"),
+  button: document.querySelector("#check-button"),
+  financialSection: document.querySelector("#financial-section"),
+  revenueValue: document.querySelector("#revenue-value"),
+  revenueLabel: document.querySelector("#revenue-label"),
+  employeesCard: document.querySelector("#employees-card"),
+  employeesValue: document.querySelector("#employees-value"),
+  profitCard: document.querySelector("#profit-card"),
+  profitValue: document.querySelector("#profit-value"),
+  profitLabel: document.querySelector("#profit-label"),
+  marginCard: document.querySelector("#margin-card"),
+  marginValue: document.querySelector("#margin-value"),
+  atecoSection: document.querySelector("#ateco-section"),
+  atecoCode: document.querySelector("#ateco-code"),
+  atecoDescription: document.querySelector("#ateco-description")
 };
 
-let currentVat = "";
+let currentScan = null;
+let companyIsVisible = false;
 
 function digitsOnly(value) {
   return String(value || "").replace(/\D/g, "");
@@ -43,58 +68,174 @@ function isValidItalianVat(value) {
   return ((10 - (sum % 10)) % 10) === Number(vat[10]);
 }
 
-function setStatus(message, { error = false } = {}) {
-  elements.statusCard.classList.remove("hidden");
+function setLoading(message) {
   elements.status.textContent = message;
-  elements.status.style.color = error ? "crimson" : "";
+  elements.loadingView.classList.remove("hidden");
 }
 
-function hideStatus() {
-  elements.statusCard.classList.add("hidden");
+function stopLoading() {
+  elements.loadingView.classList.add("hidden");
 }
 
-function hideCompany() {
-  elements.companyCard.classList.add("hidden");
+function showManual({ allowCancel = companyIsVisible, message } = {}) {
+  elements.manualDescription.textContent =
+    message || "Inserisci la Partita IVA dell'azienda che vuoi cercare.";
+  elements.cancelManual.classList.toggle("hidden", !allowCancel);
+  elements.manualPanel.classList.remove("hidden");
+  setTimeout(() => elements.input.focus(), 0);
 }
 
-function renderCompany(data) {
-  currentVat = data.vatNumber;
-  elements.name.textContent = data.name || "Ragione sociale non restituita da VIES";
-  elements.validity.textContent = data.valid ? "Presente in VIES" : "Non presente in VIES";
-  elements.validity.classList.toggle("valid", data.valid);
-  elements.validity.classList.toggle("invalid", !data.valid);
-  elements.vat.textContent = `${data.countryCode || "IT"} ${data.vatNumber}`;
-  elements.address.textContent = data.address || "Non disponibile";
-  elements.requestDate.textContent = data.requestDate || "—";
-  elements.viesLink.href = viesUrl;
-  elements.companyCard.classList.remove("hidden");
-  hideStatus();
+function hideManual() {
+  elements.manualPanel.classList.add("hidden");
 }
 
-async function verifyVat(rawVat, { bypassCache = false } = {}) {
+function fallbackCompanyName(viesData) {
+  if (viesData?.name) return viesData.name;
+  if (currentScan?.siteName) return currentScan.siteName;
+  if (currentScan?.hostname) return currentScan.hostname;
+  return "Azienda";
+}
+
+function renderContacts(scan) {
+  const email = scan?.contacts?.emails?.[0] || "";
+  const phone = scan?.contacts?.phones?.[0] || "";
+  const origin = scan?.origin || "";
+
+  elements.emailCard.classList.toggle("hidden", !email);
+  elements.phoneCard.classList.toggle("hidden", !phone);
+
+  if (email) {
+    elements.email.textContent = email;
+    elements.email.href = `mailto:${email}`;
+  }
+
+  if (phone) {
+    elements.phone.textContent = phone;
+    elements.phone.href = `tel:${phone}`;
+  }
+
+  if (origin) {
+    elements.website.textContent = scan.hostname || origin;
+    elements.website.href = origin;
+  } else {
+    elements.website.textContent = "Sito non disponibile";
+    elements.website.removeAttribute("href");
+  }
+
+  elements.contactsSection.classList.remove("hidden");
+}
+
+function renderFinancials(financials) {
+  const hasRevenue = financials?.revenue?.value;
+  const hasEmployees = financials?.employees;
+  const hasProfit = financials?.profit?.value;
+  const hasMargin = financials?.netMargin;
+  const hasAny = hasRevenue || hasEmployees || hasProfit || hasMargin;
+
+  elements.financialSection.classList.toggle("hidden", !hasAny);
+  if (!hasAny) return;
+
+  if (hasRevenue) {
+    elements.revenueValue.textContent = financials.revenue.value;
+    elements.revenueLabel.textContent = financials.revenue.year
+      ? `Fatturato ${financials.revenue.year}`
+      : "Fatturato";
+  }
+
+  elements.employeesCard.classList.toggle("hidden", !hasEmployees);
+  if (hasEmployees) elements.employeesValue.textContent = financials.employees;
+
+  elements.profitCard.classList.toggle("hidden", !hasProfit);
+  if (hasProfit) {
+    elements.profitValue.textContent = financials.profit.value;
+    elements.profitLabel.textContent = financials.profit.year
+      ? `utile ${financials.profit.year}`
+      : "utile";
+  }
+
+  elements.marginCard.classList.toggle("hidden", !hasMargin);
+  if (hasMargin) elements.marginValue.textContent = financials.netMargin;
+}
+
+function renderAteco(ateco) {
+  const hasAteco = ateco?.code || ateco?.description;
+  elements.atecoSection.classList.toggle("hidden", !hasAteco);
+  if (!hasAteco) return;
+
+  elements.atecoCode.textContent = ateco.code || "";
+  elements.atecoDescription.textContent = ateco.description || "";
+}
+
+function renderCompany(viesData, { source = "automatic" } = {}) {
+  const vat = viesData?.vatNumber || digitsOnly(elements.input.value);
+  const name = fallbackCompanyName(viesData);
+  const address = viesData?.address || "";
+
+  elements.name.textContent = name;
+  elements.vat.textContent = vat ? `IT ${vat}` : "—";
+  elements.address.textContent = address || "Non disponibile";
+  elements.addressRow.classList.toggle("hidden", !address);
+
+  const verified = Boolean(viesData?.valid);
+  elements.identityBadge.textContent = verified ? "Identificata" : "Rilevata";
+  elements.identityBadge.classList.toggle("unverified", !verified);
+
+  const cityHint = address
+    ? address.split(/\s{2,}|\n/).filter(Boolean).pop()
+    : currentScan?.hostname || "";
+  elements.location.textContent = cityHint || "";
+
+  elements.sourceStatus.textContent = source === "automatic"
+    ? verified
+      ? "P.IVA dal sito · anagrafica verificata"
+      : "P.IVA rilevata dal sito"
+    : verified
+      ? "P.IVA inserita · anagrafica verificata"
+      : "P.IVA inserita manualmente";
+
+  renderContacts(currentScan);
+  renderFinancials(null);
+  renderAteco(null);
+
+  elements.companyView.classList.remove("hidden");
+  companyIsVisible = true;
+  stopLoading();
+}
+
+async function lookupVat(rawVat, { source = "manual", bypassCache = false } = {}) {
   const vat = digitsOnly(rawVat);
 
   if (!isValidItalianVat(vat)) {
-    hideCompany();
-    setStatus("Inserisci una Partita IVA italiana formalmente valida.", { error: true });
+    stopLoading();
+    showManual({
+      allowCancel: companyIsVisible,
+      message: "La Partita IVA inserita non supera il controllo formale."
+    });
     return;
   }
 
   elements.input.value = vat;
   elements.button.disabled = true;
-  hideCompany();
-  setStatus("Verifica in corso su VIES…");
+  setLoading("Recupero dati aziendali…");
 
   try {
-    const result = await checkItalianVatOnVies(vat, { bypassCache });
-    renderCompany(result);
-    elements.detectionNote.textContent = result.cached
-      ? "Risultato VIES recuperato dalla cache locale."
-      : result.valid
-        ? "La P.IVA risulta abilitata agli scambi intracomunitari in VIES."
-        : "La P.IVA è formalmente valida, ma non risulta abilitata in VIES.";
-  } catch (error) {
-    setStatus(error?.message || "Impossibile interrogare VIES.", { error: true });
+    const viesData = await checkItalianVatOnVies(vat, { bypassCache });
+    renderCompany(viesData, { source });
+    hideManual();
+  } catch {
+    renderCompany(
+      {
+        vatNumber: vat,
+        valid: false,
+        name: null,
+        address: null
+      },
+      { source }
+    );
+    elements.sourceStatus.textContent = source === "automatic"
+      ? "P.IVA rilevata dal sito · anagrafica non disponibile"
+      : "P.IVA inserita · anagrafica non disponibile";
+    hideManual();
   } finally {
     elements.button.disabled = false;
   }
@@ -105,13 +246,15 @@ async function inspectActivePage() {
   try {
     tabs = await api.tabs.query({ active: true, currentWindow: true });
   } catch {
-    setStatus("Impossibile leggere la scheda attiva.", { error: true });
+    stopLoading();
+    showManual({ allowCancel: false, message: "Non riesco a leggere la scheda attiva." });
     return;
   }
 
   const tab = tabs?.[0];
   if (!tab?.id) {
-    setStatus("Nessuna scheda attiva disponibile.", { error: true });
+    stopLoading();
+    showManual({ allowCancel: false, message: "Nessuna scheda attiva disponibile." });
     return;
   }
 
@@ -119,10 +262,9 @@ async function inspectActivePage() {
     if (tab.url) {
       const url = new URL(tab.url);
       elements.host.textContent = url.hostname || tab.url;
-
       if (!["http:", "https:"].includes(url.protocol)) {
-        setStatus("Apri un normale sito web per cercare automaticamente la Partita IVA.");
-        elements.detectionNote.textContent = "Puoi comunque inserirla manualmente.";
+        stopLoading();
+        showManual({ allowCancel: false, message: "Apri un sito web oppure inserisci una P.IVA." });
         return;
       }
     }
@@ -137,40 +279,51 @@ async function inspectActivePage() {
     });
 
     const mainFrame = injection?.find((item) => item.frameId === 0) || injection?.[0];
-
     if (mainFrame?.error) {
       throw new Error(mainFrame.error?.message || String(mainFrame.error));
     }
 
-    const scan = mainFrame?.result;
-    const candidates = scan?.candidates || [];
+    currentScan = mainFrame?.result || null;
+    if (currentScan?.hostname) elements.host.textContent = currentScan.hostname;
 
+    const candidates = currentScan?.candidates || [];
     if (!candidates.length) {
-      setStatus("Nessuna Partita IVA valida trovata automaticamente.");
-      elements.detectionNote.textContent = scan?.diagnostics
-        ? `Pagina letta correttamente (${scan.diagnostics.bodyTextLength} caratteri), ma nessuna P.IVA riconosciuta.`
-        : "Puoi inserirla manualmente.";
+      stopLoading();
+      showManual({
+        allowCancel: false,
+        message: "Non ho trovato una Partita IVA valida nella pagina."
+      });
       return;
     }
 
-    const best = candidates[0];
-    elements.input.value = best.vat;
-
-    elements.detectionNote.textContent = candidates.length > 1
-      ? `Trovate ${candidates.length} P.IVA possibili; uso quella con il contesto più probabile.`
-      : `P.IVA rilevata automaticamente (${best.source}).`;
-
-    await verifyVat(best.vat);
-  } catch (error) {
-    setStatus("Non posso analizzare questa pagina. Inserisci la P.IVA manualmente.", { error: true });
-    elements.detectionNote.textContent = error?.message || "";
+    await lookupVat(candidates[0].vat, { source: "automatic" });
+  } catch {
+    stopLoading();
+    showManual({
+      allowCancel: false,
+      message: "Non riesco ad analizzare questa pagina. Inserisci la P.IVA manualmente."
+    });
   }
 }
 
-elements.button.addEventListener("click", () => verifyVat(elements.input.value, { bypassCache: true }));
+async function copyValue(value, button) {
+  if (!value) return;
+  await navigator.clipboard.writeText(value);
+  const previous = button.textContent;
+  button.textContent = "Copiato";
+  setTimeout(() => {
+    button.textContent = previous;
+  }, 1100);
+}
+
+elements.button.addEventListener("click", () =>
+  lookupVat(elements.input.value, { source: "manual", bypassCache: true })
+);
 
 elements.input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") verifyVat(elements.input.value, { bypassCache: true });
+  if (event.key === "Enter") {
+    lookupVat(elements.input.value, { source: "manual", bypassCache: true });
+  }
 });
 
 elements.input.addEventListener("input", () => {
@@ -178,15 +331,19 @@ elements.input.addEventListener("input", () => {
   if (normalized !== elements.input.value) elements.input.value = normalized;
 });
 
-elements.copyButton.addEventListener("click", async () => {
-  if (!currentVat) return;
-
-  await navigator.clipboard.writeText(currentVat);
-  const previous = elements.copyButton.textContent;
-  elements.copyButton.textContent = "Copiata";
-  setTimeout(() => {
-    elements.copyButton.textContent = previous;
-  }, 1200);
+elements.showManual.addEventListener("click", () => {
+  elements.input.value = elements.vat.textContent.replace(/\D/g, "");
+  showManual({ allowCancel: true });
 });
+
+elements.cancelManual.addEventListener("click", hideManual);
+
+elements.copyEmail.addEventListener("click", () =>
+  copyValue(elements.email.textContent, elements.copyEmail)
+);
+
+elements.copyPhone.addEventListener("click", () =>
+  copyValue(elements.phone.textContent, elements.copyPhone)
+);
 
 inspectActivePage();
