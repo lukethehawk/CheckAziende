@@ -97,3 +97,47 @@ test("confirmed domain mapping can become identified", () => {
   assert.equal(assessment.status, "identified");
   assert.ok(assessment.score >= 90);
 });
+
+
+test("generic company-page VAT is rejected when company conflicts with the site brand", () => {
+  const assessment = assessVatMatch({
+    candidate: {
+      vat: "02263110229",
+      source: "pagina azienda",
+      evidenceType: "vat_company_page"
+    },
+    company: {
+      name: "GRIMONT E.P.C.M. S.R.L."
+    },
+    pageContext: {
+      hostname: "xrayfinance.it",
+      title: "Xray Finance - Fatturato e Dati Finanziari delle aziende italiane",
+      brandHints: ["Xray Finance"]
+    }
+  });
+
+  assert.equal(assessment.status, "unidentified");
+  assert.ok(assessment.score < 65);
+});
+
+test("generic company-page VAT can remain a possible match when brand and domain agree", () => {
+  const assessment = assessVatMatch({
+    candidate: {
+      vat: "03201220211",
+      source: "pagina azienda",
+      evidenceType: "vat_company_page"
+    },
+    company: {
+      name: "XRAY FINANCE SRL"
+    },
+    pageContext: {
+      hostname: "xrayfinance.it",
+      title: "Xray Finance",
+      brandHints: ["Xray Finance"]
+    }
+  });
+
+  assert.equal(assessment.status, "possible");
+  assert.ok(assessment.score >= 65);
+  assert.ok(assessment.score < 90);
+});
