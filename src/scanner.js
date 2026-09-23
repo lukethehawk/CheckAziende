@@ -346,16 +346,41 @@ export function scanCurrentPage() {
   const applicationName =
     document.querySelector('meta[name="application-name"]')?.getAttribute("content")?.trim();
 
+  const homepageBrandHints = unique(
+    [...document.querySelectorAll('a[href]')]
+      .map((anchor) => {
+        let url;
+        try {
+          url = new URL(anchor.getAttribute("href") || "", location.href);
+        } catch {
+          return "";
+        }
+
+        if (url.origin !== location.origin) return "";
+        if (url.pathname !== "/" || url.search || url.hash) return "";
+
+        const text = clean(anchor.textContent || "", 80);
+        if (!text || text.length < 2 || text.length > 60) return "";
+        if (/^(?:home|homepage|torna alla home|logo)$/i.test(text)) return "";
+
+        return text;
+      })
+  ).slice(0, 4);
+
   const siteName =
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
     applicationName ||
+    homepageBrandHints[0] ||
     location.hostname;
 
   // H1 and document.title describe the current page and can name a third-party
   // company on directories. Keep brand hints limited to site-level signals.
+  // A same-origin link to "/" is also a strong site-brand signal and covers
+  // portals where the logo is rendered as text instead of an <img>.
   const brandHints = unique([
     document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim(),
     applicationName,
+    ...homepageBrandHints,
     ...[...document.querySelectorAll('img[alt]')]
       .filter((node) =>
         /logo|brand/i.test(node.className || "") ||
@@ -453,6 +478,7 @@ export async function scanRelatedPages(urls) {
   const candidates = [];
   const emails = [];
   const phones = [];
+  const ownerHints = [];
   const checkedUrls = [];
 
   for (const rawUrl of Array.isArray(urls) ? urls.slice(0, 6) : []) {
@@ -481,6 +507,30 @@ export async function scanRelatedPages(urls) {
       const text = doc.body?.innerText || doc.body?.textContent || "";
       const label = sourceLabel(response.url || url.href, doc.title?.trim());
       checkedUrls.push(response.url || url.href);
+
+      // Privacy/legal pages often identify the site owner by legal name but do
+      // not repeat its VAT number. Keep that legal name as a site-owner hint
+      // for the later domain/provider lookup.
+      if (label === "privacy policy" || label === "note legali") {
+        const ownerPatterns = [
+          /Titolare\s+del\s+Trattamento(?:\s+dei\s+Dati)?\s*\n+\s*([^\n]{2,180})/i,
+          /(?:Titolare|Data\s+Controller)\s*:?\s*\n+\s*([^\n]{2,180})/i
+        ];
+
+        for (const pattern of ownerPatterns) {
+          const ownerLine = text.match(pattern)?.[1];
+          if (!ownerLine) continue;
+
+          const legalName = clean(ownerLine, 180).match(
+            /^(.+?\b(?:s\.?r\.?l\.?s?\.?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|societa\s+cooperativa|cooperativa))\b/i
+          )?.[1];
+
+          if (legalName) {
+            ownerHints.push(clean(legalName, 120));
+            break;
+          }
+        }
+      }
 
       const pageCandidates = [];
 
@@ -557,6 +607,7 @@ export async function scanRelatedPages(urls) {
       emails: unique(emails).filter((email) => email.length <= 120).slice(0, 6),
       phones: unique(phones).filter((phone) => phone.length >= 6 && phone.length <= 40).slice(0, 6)
     },
+    ownerHints: unique(ownerHints).slice(0, 6),
     checkedUrls
   };
 }
