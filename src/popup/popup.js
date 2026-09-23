@@ -1,5 +1,6 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
 import { findAziendeCompaniesByContext } from "../providers/aziende.js";
+import { findRegistroAziendeCompaniesByContext } from "../providers/registroaziende.js";
 import {
   previousBalanceRows,
   resolveCompanyProviders
@@ -91,6 +92,7 @@ const elements = {
 
 let currentScan = null;
 let currentDomainLookup = null;
+let currentOwnerCityHints = [];
 let companyIsVisible = false;
 let dataCompletionGeneration = 0;
 let dataCompletionTimer = null;
@@ -150,6 +152,11 @@ function mergeRelatedContacts(related) {
 
 function mergeRelatedOwnerHints(related) {
   const ownerHints = unique(related?.ownerHints || []);
+  currentOwnerCityHints = unique([
+    ...currentOwnerCityHints,
+    ...(related?.ownerCityHints || [])
+  ]);
+
   if (!ownerHints.length) return;
 
   currentDomainLookup = buildDomainLookupContext({
@@ -852,7 +859,24 @@ async function lookupCompanyFromDomain() {
 
   setLoading("Cerco una possibile corrispondenza…");
 
-  const candidates = await findAziendeCompaniesByContext({ names });
+  const [aziendeCandidates, registroCandidates] = await Promise.all([
+    findAziendeCompaniesByContext({ names }),
+    findRegistroAziendeCompaniesByContext({
+      names,
+      cityHints: currentOwnerCityHints
+    })
+  ]);
+
+  const candidatesByVat = new Map();
+
+  // Aziende.it remains preferred when both discovery sources find the same VAT,
+  // while RegistroAziende can discover entities that Aziende.it does not expose.
+  for (const company of [...registroCandidates, ...aziendeCandidates]) {
+    if (!company?.vat) continue;
+    candidatesByVat.set(company.vat, company);
+  }
+
+  const candidates = [...candidatesByVat.values()];
   if (!candidates.length) return false;
 
   const pageContext = getPageContext();
@@ -875,7 +899,10 @@ async function lookupCompanyFromDomain() {
   const resolved = await resolveCompanyProviders({
     vat: best.company.vat,
     names: unique([best.company.name, ...names]),
-    cityHints: [best.company.city].filter(Boolean)
+    cityHints: unique([
+      best.company.city,
+      ...currentOwnerCityHints
+    ])
   });
 
   const company = normalizeCompany(
@@ -950,6 +977,7 @@ async function inspectActivePage() {
     }
 
     currentScan = mainFrame?.result || null;
+    currentOwnerCityHints = [];
 
     currentDomainLookup = buildDomainLookupContext({
       hostname: currentScan?.hostname || "",
