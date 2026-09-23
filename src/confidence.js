@@ -79,7 +79,10 @@ export function assessVatMatch({ candidate, company, pageContext, manual = false
   // JSON-LD on a directory/profile page often describes the company being
   // viewed rather than the website owner. Treat it as strong ownership
   // evidence only when the company is coherent with site-level brand/domain.
-  if (evidenceType === "vat_structured" && !ownerCoherent) {
+  if (
+    (evidenceType === "vat_structured" || evidenceType === "vat_metadata") &&
+    !ownerCoherent
+  ) {
     baseWeight = 55;
   }
 
