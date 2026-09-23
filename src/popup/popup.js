@@ -7,6 +7,7 @@ const elements = {
   host: document.querySelector("#page-host"),
   loadingView: document.querySelector("#loading-view"),
   status: document.querySelector("#status"),
+  unidentifiedView: document.querySelector("#unidentified-view"),
   companyView: document.querySelector("#company-view"),
   identityBadge: document.querySelector("#identity-badge"),
   name: document.querySelector("#company-name"),
@@ -21,7 +22,6 @@ const elements = {
   phoneCard: document.querySelector("#phone-card"),
   phone: document.querySelector("#company-phone"),
   copyPhone: document.querySelector("#copy-phone"),
-  website: document.querySelector("#company-website"),
   sourceStatus: document.querySelector("#source-status"),
   showManual: document.querySelector("#show-manual"),
   manualPanel: document.querySelector("#manual-panel"),
@@ -79,7 +79,7 @@ function stopLoading() {
 
 function showManual({ allowCancel = companyIsVisible, message } = {}) {
   elements.manualDescription.textContent =
-    message || "Inserisci la Partita IVA dell'azienda che vuoi cercare.";
+    message || "Inserisci la Partita IVA dell'azienda.";
   elements.cancelManual.classList.toggle("hidden", !allowCancel);
   elements.manualPanel.classList.remove("hidden");
   setTimeout(() => elements.input.focus(), 0);
@@ -91,16 +91,15 @@ function hideManual() {
 
 function fallbackCompanyName(viesData) {
   if (viesData?.name) return viesData.name;
-  if (currentScan?.siteName) return currentScan.siteName;
-  if (currentScan?.hostname) return currentScan.hostname;
-  return "Azienda";
+  return viesData?.vatNumber ? `P.IVA ${viesData.vatNumber}` : "Azienda";
 }
 
 function renderContacts(scan) {
   const email = scan?.contacts?.emails?.[0] || "";
   const phone = scan?.contacts?.phones?.[0] || "";
-  const origin = scan?.origin || "";
+  const hasAny = Boolean(email || phone);
 
+  elements.contactsSection.classList.toggle("hidden", !hasAny);
   elements.emailCard.classList.toggle("hidden", !email);
   elements.phoneCard.classList.toggle("hidden", !phone);
 
@@ -113,16 +112,6 @@ function renderContacts(scan) {
     elements.phone.textContent = phone;
     elements.phone.href = `tel:${phone}`;
   }
-
-  if (origin) {
-    elements.website.textContent = scan.hostname || origin;
-    elements.website.href = origin;
-  } else {
-    elements.website.textContent = "Sito non disponibile";
-    elements.website.removeAttribute("href");
-  }
-
-  elements.contactsSection.classList.remove("hidden");
 }
 
 function renderFinancials(financials) {
@@ -166,32 +155,39 @@ function renderAteco(ateco) {
   elements.atecoDescription.textContent = ateco.description || "";
 }
 
+function showUnidentified(message) {
+  companyIsVisible = false;
+  elements.companyView.classList.add("hidden");
+  elements.unidentifiedView.classList.remove("hidden");
+  const copy = elements.unidentifiedView.querySelector(".unidentified-copy");
+  if (message) copy.textContent = message;
+  renderContacts(currentScan);
+  stopLoading();
+  showManual({ allowCancel: false });
+}
+
 function renderCompany(viesData, { source = "automatic" } = {}) {
   const vat = viesData?.vatNumber || digitsOnly(elements.input.value);
   const name = fallbackCompanyName(viesData);
   const address = viesData?.address || "";
 
+  elements.unidentifiedView.classList.add("hidden");
   elements.name.textContent = name;
   elements.vat.textContent = vat ? `IT ${vat}` : "—";
   elements.address.textContent = address || "Non disponibile";
   elements.addressRow.classList.toggle("hidden", !address);
 
-  const verified = Boolean(viesData?.valid);
-  elements.identityBadge.textContent = verified ? "Identificata" : "Rilevata";
-  elements.identityBadge.classList.toggle("unverified", !verified);
+  elements.identityBadge.textContent = source === "automatic" ? "Identificata" : "Ricerca manuale";
+  elements.identityBadge.classList.toggle("unverified", source !== "automatic");
 
   const cityHint = address
     ? address.split(/\s{2,}|\n/).filter(Boolean).pop()
-    : currentScan?.hostname || "";
-  elements.location.textContent = cityHint || "";
+    : "";
+  elements.location.textContent = cityHint;
 
   elements.sourceStatus.textContent = source === "automatic"
-    ? verified
-      ? "P.IVA dal sito · anagrafica verificata"
-      : "P.IVA rilevata dal sito"
-    : verified
-      ? "P.IVA inserita · anagrafica verificata"
-      : "P.IVA inserita manualmente";
+    ? "P.IVA identificata da footer/area legale del sito"
+    : "P.IVA inserita manualmente";
 
   renderContacts(currentScan);
   renderFinancials(null);
@@ -232,9 +228,6 @@ async function lookupVat(rawVat, { source = "manual", bypassCache = false } = {}
       },
       { source }
     );
-    elements.sourceStatus.textContent = source === "automatic"
-      ? "P.IVA rilevata dal sito · anagrafica non disponibile"
-      : "P.IVA inserita · anagrafica non disponibile";
     hideManual();
   } finally {
     elements.button.disabled = false;
@@ -247,14 +240,14 @@ async function inspectActivePage() {
     tabs = await api.tabs.query({ active: true, currentWindow: true });
   } catch {
     stopLoading();
-    showManual({ allowCancel: false, message: "Non riesco a leggere la scheda attiva." });
+    showUnidentified("Non riesco a leggere la scheda attiva.");
     return;
   }
 
   const tab = tabs?.[0];
   if (!tab?.id) {
     stopLoading();
-    showManual({ allowCancel: false, message: "Nessuna scheda attiva disponibile." });
+    showUnidentified("Nessuna scheda attiva disponibile.");
     return;
   }
 
@@ -263,8 +256,7 @@ async function inspectActivePage() {
       const url = new URL(tab.url);
       elements.host.textContent = url.hostname || tab.url;
       if (!["http:", "https:"].includes(url.protocol)) {
-        stopLoading();
-        showManual({ allowCancel: false, message: "Apri un sito web oppure inserisci una P.IVA." });
+        showUnidentified("Questa pagina non può essere identificata automaticamente.");
         return;
       }
     }
@@ -288,21 +280,17 @@ async function inspectActivePage() {
 
     const candidates = currentScan?.candidates || [];
     if (!candidates.length) {
-      stopLoading();
-      showManual({
-        allowCancel: false,
-        message: "Non ho trovato una Partita IVA valida nella pagina."
-      });
+      showUnidentified(
+        "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
+      );
       return;
     }
 
     await lookupVat(candidates[0].vat, { source: "automatic" });
   } catch {
-    stopLoading();
-    showManual({
-      allowCancel: false,
-      message: "Non riesco ad analizzare questa pagina. Inserisci la P.IVA manualmente."
-    });
+    showUnidentified(
+      "Non riesco a identificare automaticamente una società su questa pagina."
+    );
   }
 }
 
