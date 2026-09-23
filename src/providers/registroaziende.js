@@ -218,9 +218,7 @@ export function parseRegistroAziendeText(text, { url = null } = {}) {
   const profitValue = scaledMoney(profitSection);
   const history = parseHistoryFromLines(lines);
   const inlineHistory = parseHistoryFromInlineText(source);
-  const mergedHistory = inlineHistory.length
-    ? inlineHistory
-    : history;
+  const mergedHistory = mergeHistoryRows(history, inlineHistory);
 
   return {
     provider: "RegistroAziende.it",
