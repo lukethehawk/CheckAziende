@@ -122,7 +122,6 @@ export function buildDomainLookupContext(pageContext) {
   const brandHints = uniqueBrandHints([
     ...(pageContext?.brandHints || []),
     pageContext?.siteName,
-    pageContext?.title,
     domain.rootLabel
   ]);
 
