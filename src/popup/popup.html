@@ -8,17 +8,106 @@
 </head>
 <body>
   <main class="app">
-    <header class="header">
-      <div>
-        <h1>CheckAziende</h1>
-        <p id="page-host" class="muted">Analisi della pagina…</p>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>CheckAziende</h1>
+          <p id="page-host">Analisi del sito…</p>
+        </div>
       </div>
-      <span class="badge">beta</span>
+      <span class="country">Italia</span>
     </header>
 
-    <section class="card">
-      <label class="label" for="vat-input">Partita IVA</label>
-      <div class="vat-row">
+    <section id="loading-view" class="loading-view" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="status">Identificazione azienda…</span>
+    </section>
+
+    <section id="company-view" class="company-view hidden">
+      <div class="identity">
+        <span id="identity-badge" class="identity-badge">Identificata</span>
+        <h2 id="company-name">Azienda</h2>
+        <p id="company-location" class="company-location"></p>
+      </div>
+
+      <section id="financial-section" class="financial-section hidden">
+        <div class="revenue-block">
+          <strong id="revenue-value" class="revenue-value">—</strong>
+          <span id="revenue-label" class="metric-caption">Fatturato</span>
+        </div>
+
+        <div class="metric-grid">
+          <article id="employees-card" class="metric-card hidden">
+            <strong id="employees-value">—</strong>
+            <span>dipendenti</span>
+          </article>
+          <article id="profit-card" class="metric-card hidden">
+            <strong id="profit-value">—</strong>
+            <span id="profit-label">utile</span>
+          </article>
+          <article id="margin-card" class="metric-card hidden">
+            <strong id="margin-value">—</strong>
+            <span>margine netto</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="ateco-section" class="section hidden">
+        <p class="section-kicker">ATECO <strong id="ateco-code"></strong></p>
+        <p id="ateco-description" class="section-copy"></p>
+      </section>
+
+      <section class="section company-data">
+        <div class="data-row">
+          <span>Partita IVA</span>
+          <strong id="company-vat">—</strong>
+        </div>
+        <div id="address-row" class="data-row">
+          <span>Sede</span>
+          <strong id="company-address">—</strong>
+        </div>
+      </section>
+
+      <section id="contacts-section" class="contacts hidden">
+        <article id="email-card" class="contact-card hidden">
+          <div>
+            <span class="contact-label">Email dal sito</span>
+            <a id="company-email" href="#"></a>
+          </div>
+          <button id="copy-email" class="copy-button" type="button">Copia</button>
+        </article>
+
+        <article id="phone-card" class="contact-card hidden">
+          <div>
+            <span class="contact-label">Telefono dal sito</span>
+            <a id="company-phone" href="#"></a>
+          </div>
+          <button id="copy-phone" class="copy-button" type="button">Copia</button>
+        </article>
+
+        <article class="contact-card">
+          <div>
+            <span class="contact-label">Sito web</span>
+            <a id="company-website" href="#" target="_blank" rel="noreferrer"></a>
+          </div>
+          <span class="open-icon" aria-hidden="true">↗</span>
+        </article>
+      </section>
+
+      <div class="source-line">
+        <span id="source-status">P.IVA rilevata dal sito</span>
+        <span aria-hidden="true">•</span>
+        <button id="show-manual" class="text-button" type="button">Cambia P.IVA</button>
+      </div>
+    </section>
+
+    <section id="manual-panel" class="manual-panel hidden">
+      <p class="manual-title">Inserisci una Partita IVA</p>
+      <p id="manual-description" class="manual-description">
+        Non sono riuscito a identificarla automaticamente.
+      </p>
+      <div class="manual-row">
         <input
           id="vat-input"
           type="text"
@@ -26,48 +115,15 @@
           autocomplete="off"
           maxlength="14"
           placeholder="Es. 12345678901"
+          aria-label="Partita IVA"
         >
-        <button id="check-button" type="button">Verifica</button>
+        <button id="check-button" class="primary-button" type="button">Cerca</button>
       </div>
-      <p id="detection-note" class="hint"></p>
-    </section>
-
-    <section id="status-card" class="card status-card" aria-live="polite">
-      <div id="status" class="status">Ricerca Partita IVA nella pagina…</div>
-    </section>
-
-    <section id="company-card" class="card company-card hidden">
-      <div class="company-heading">
-        <div>
-          <p class="eyebrow">VIES</p>
-          <h2 id="company-name">Azienda</h2>
-        </div>
-        <span id="validity-badge" class="validity"></span>
-      </div>
-
-      <dl class="details">
-        <div>
-          <dt>Partita IVA</dt>
-          <dd id="company-vat">—</dd>
-        </div>
-        <div>
-          <dt>Sede</dt>
-          <dd id="company-address">—</dd>
-        </div>
-        <div>
-          <dt>Verifica</dt>
-          <dd id="request-date">—</dd>
-        </div>
-      </dl>
-
-      <div class="actions">
-        <button id="copy-button" class="secondary" type="button">Copia P.IVA</button>
-        <a id="vies-link" class="secondary link-button" href="#" target="_blank" rel="noreferrer">Apri VIES</a>
-      </div>
+      <button id="cancel-manual" class="cancel-button hidden" type="button">Annulla</button>
     </section>
 
     <footer class="footer">
-      La pagina viene analizzata localmente. Solo la P.IVA viene inviata a VIES per la verifica.
+      Dati societari da fonti pubbliche. I contatti vengono letti dalla pagina aperta.
     </footer>
   </main>
 
