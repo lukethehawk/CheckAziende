@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildRegistroSlugCandidates,
+  parseRegistroAziendeSearchCandidates,
   parseRegistroAziendeSearchRows,
   parseRegistroAziendeText,
   rankRegistroAziendeCompaniesByQuery
@@ -229,4 +230,50 @@ test("manual company search keeps close variants but rejects unrelated companies
   assert.equal(ranked[0].vat, "11295150152");
   assert.ok(ranked.some((company) => company.vat === "08714741215"));
   assert.ok(!ranked.some((company) => company.vat === "03170010734"));
+});
+
+
+test("manual search discovery keeps relevant company links even without VAT in the result row", () => {
+  const candidates = parseRegistroAziendeSearchCandidates([
+    {
+      name: "Future Tech Srl",
+      href: "/azienda/future-tech-srl-basiglio",
+      location: "BASIGLIO, Milano",
+      cells: ["Future Tech Srl", "BASIGLIO", "€ 1.99 M"]
+    }
+  ]);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].name, "Future Tech Srl");
+  assert.equal(candidates[0].vat, null);
+  assert.equal(
+    candidates[0].providerUrl,
+    "https://registroaziende.it/azienda/future-tech-srl-basiglio"
+  );
+});
+
+test("manual search rejects partial-token noise such as SCStechnology for Future Tech", () => {
+  const ranked = rankRegistroAziendeCompaniesByQuery([
+    { name: "Scstechnology Srl", vat: "02878300181" },
+    { name: "Future Tech Srl", vat: "11295150152" },
+    { name: "Future Technology Srl", vat: "08714741215" }
+  ], "future tech srl");
+
+  assert.deepEqual(
+    ranked.map((company) => company.vat),
+    ["11295150152", "08714741215"]
+  );
+});
+
+test("manual search supports exact three-character company names", () => {
+  const ranked = rankRegistroAziendeCompaniesByQuery([
+    { name: "Epy Srl", vat: "05973540155" },
+    { name: "Epy Srl", vat: "13237730018" },
+    { name: "Happy Srl", vat: "00000000000" }
+  ], "epy");
+
+  assert.deepEqual(
+    ranked.map((company) => company.vat),
+    ["05973540155", "13237730018"]
+  );
 });
