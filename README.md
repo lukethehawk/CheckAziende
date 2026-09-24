@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.3`.
+Versione `0.8.4`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -321,3 +321,15 @@ La versione 0.8.3 consolida il passaggio del provider canonico da Aziende.it a C
 - le fixture legacy Aziende.it non fanno più parte della suite attiva.
 
 Il flusso resta: **CompanyReports.it → canonico**, **RegistroAziende.it → fallback/verifica**, **Xray Finance → arricchimento**.
+
+
+## Dati CompanyReports in UI 0.8.4
+
+La versione 0.8.4 espone alcuni dati già disponibili dal provider CompanyReports senza appesantire la scheda principale.
+
+- il **costo del personale** viene mostrato nell'accordion del profilo finanziario, con l'anno quando disponibile;
+- viene calcolata automaticamente l'**incidenza costo personale / fatturato**, usando il fatturato dello stesso esercizio del costo del personale;
+- il **Codice fiscale** compare nei dati societari solo quando è diverso dalla Partita IVA;
+- il campo precedentemente etichettato **Iscrizione** viene mostrato come **Costituzione**, coerentemente con il dato `Fondazione` fornito da CompanyReports.
+
+Il rapporto costo personale / fatturato conserva il riferimento allo stesso esercizio anche quando RegistroAziende promuove un fatturato più recente come dato principale.
