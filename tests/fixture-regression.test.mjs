@@ -61,7 +61,7 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
   assert.equal(company.financials.revenue.year, 2025);
   assert.equal(company.financials.revenue.value, 1_820_000);
   assert.equal(company.financials.profit.value, 266_000);
-  assert.ok(company.provider.includes("Aziende.it"));
+  assert.ok(company.provider.includes("CompanyReports.it"));
   assert.ok(company.provider.includes("RegistroAziende.it"));
 
   const evaluation = evaluateFinancialProfile(company, {
@@ -96,7 +96,7 @@ test("fixture: Rubino keeps Xray enrichment after canonical Aziende data", async
   assert.equal(company.financials.ebitda.value, 283_000);
   assert.equal(company.financials.ebitdaMargin.value, 12.41);
   assert.equal(company.financials.revenue.value, 2_277_793);
-  assert.ok(company.provider.includes("Aziende.it"));
+  assert.ok(company.provider.includes("CompanyReports.it"));
   assert.ok(company.provider.includes("Xray Finance"));
 
   const evaluation = evaluateFinancialProfile(company, {
