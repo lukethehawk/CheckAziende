@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.0`.
+Versione `0.9.1`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -360,3 +360,16 @@ La ricerca manuale accetta ora sia **Partita IVA** sia **ragione sociale**.
 - non vengono effettuate richieste mentre l'utente digita: la ricerca parte soltanto con il pulsante **Cerca** o con Invio.
 
 La ricerca pubblica di RegistroAziende richiede almeno 4 caratteri; l'interfaccia applica lo stesso limite.
+
+
+## Manual search parser fix 0.9.1
+
+Corretto il parser della ricerca manuale per ragione sociale.
+
+RegistroAziende.it espone correttamente la ricerca pubblica tramite `/ricerca?q=...`, ma i risultati non sono garantiti in una tabella HTML semantica. La 0.9.0 cercava esclusivamente righe `<tr>`, quindi in alcune risposte reali poteva mostrare erroneamente **Nessuna azienda trovata** anche quando la società era presente.
+
+La 0.9.1:
+- mantiene il parser tabellare;
+- aggiunge un fallback basato sui link alle schede `/azienda/...`;
+- risale al contenitore del singolo risultato e ne estrae P.IVA e località;
+- invalida la cache delle ricerche manuali precedenti, così eventuali risultati vuoti della 0.9.0 non restano memorizzati.
