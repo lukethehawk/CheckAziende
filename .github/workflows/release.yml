@@ -31,27 +31,31 @@ jobs:
           VERSION=$(node -p "require('./manifest.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build extension zip
+      - name: Build and validate store packages
+        run: npm run validate:stores
+
+      - name: Create store ZIP files
         shell: bash
         run: |
-          mkdir -p dist
-          zip -r "dist/CheckAziende-${{ steps.version.outputs.version }}.zip" \
-            manifest.json \
-            src \
-            assets \
-            LICENSE \
-            README.md
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p release
+          for TARGET in firefox chrome edge opera; do
+            (
+              cd "dist/$TARGET"
+              zip -r "../../release/CheckAziende-${VERSION}-${TARGET}.zip" .
+            )
+          done
 
-      - name: Upload build artifact
+      - name: Upload store packages
         uses: actions/upload-artifact@v4
         with:
-          name: CheckAziende-${{ steps.version.outputs.version }}
-          path: dist/CheckAziende-${{ steps.version.outputs.version }}.zip
+          name: CheckAziende-${{ steps.version.outputs.version }}-stores
+          path: release/*.zip
           if-no-files-found: error
 
       - name: Publish GitHub Release for tag
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/CheckAziende-${{ steps.version.outputs.version }}.zip
+          files: release/*.zip
           generate_release_notes: true
