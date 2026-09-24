@@ -6,6 +6,7 @@
   "scripts": {
     "syntax": "node --check src/scanner.js && node --check src/domain.js && node --check src/confidence.js && node --check src/financial-evaluation.js && node --check src/company.js && node --check src/providers/vies.js && node --check src/providers/aziende.js && node --check src/providers/xray.js && node --check src/providers/registroaziende.js && node --check src/providers/orchestrator.js && node --check src/popup/popup.js",
     "test": "node --test",
-    "build:stores": "node scripts/build-stores.mjs"
+    "build:stores": "node scripts/build-stores.mjs",
+    "validate:stores": "npm run build:stores && node scripts/validate-store-builds.mjs"
   }
 }
