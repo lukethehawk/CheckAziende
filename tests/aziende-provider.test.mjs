@@ -454,3 +454,33 @@ Attiva
   assert.equal(company.financials.employees.value, null);
   assert.equal(company.financials.employees.display, "3-5");
 });
+
+
+test("parses CompanyReports labels with bare inline years", () => {
+  const text = `
+UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA
+Partita IVA
+16010961007
+Fatturato 2024
+€ 915.612 ACQUISTA BILANCIO
+Utile 2024
+€ 248.163
+Costo del personale 2024
+€ 198.587
+N. Dipendenti
+1
+Stato Attività
+Attiva
+`;
+
+  const company = parseAziendeText(text, {
+    name: "UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA"
+  });
+
+  assert.equal(company.financials.revenue.value, 915612);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 248163);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 198587);
+  assert.equal(company.financials.personnelCost.year, 2024);
+});
