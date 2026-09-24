@@ -24,9 +24,9 @@ function parsePng(buffer, expectedSize, label) {
     );
   }
 
-  if (bitDepth !== 8 || colorType !== 6 || interlace !== 0) {
+  if (bitDepth !== 8 || ![3, 6].includes(colorType) || interlace !== 0) {
     throw new Error(
-      `${label}: expected non-interlaced 8-bit RGBA PNG (bitDepth=${bitDepth}, colorType=${colorType}, interlace=${interlace})`
+      `${label}: expected non-interlaced 8-bit indexed or RGBA PNG (bitDepth=${bitDepth}, colorType=${colorType}, interlace=${interlace})`
     );
   }
 
@@ -51,7 +51,7 @@ function parsePng(buffer, expectedSize, label) {
   if (!idat.length) throw new Error(`${label}: missing IDAT data`);
 
   const raw = inflateSync(Buffer.concat(idat));
-  const bytesPerPixel = 4;
+  const bytesPerPixel = colorType === 6 ? 4 : 1;
   const stride = width * bytesPerPixel;
   const expectedRawLength = (stride + 1) * height;
 
@@ -94,8 +94,15 @@ function parsePng(buffer, expectedSize, label) {
       }
     }
 
-    for (let x = 3; x < stride; x += bytesPerPixel) {
-      if (scanline[x] > 0) visiblePixels += 1;
+    if (colorType === 6) {
+      for (let x = 3; x < stride; x += bytesPerPixel) {
+        if (scanline[x] > 0) visiblePixels += 1;
+      }
+    } else {
+      // Indexed PNGs may store transparency in a palette/tRNS chunk.
+      // Reaching this point proves the image decodes correctly; count indexed
+      // pixels as visible so store artwork is not rejected solely for palette use.
+      visiblePixels += width;
     }
 
     scanline.copy(previous);
