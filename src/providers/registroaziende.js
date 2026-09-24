@@ -533,65 +533,138 @@ export function parseRegistroAziendeSearchRows(
     : companies;
 }
 
+function searchCandidateUrl(href, baseUrl) {
+  const value = clean(href);
+  if (!value) return null;
+
+  try {
+    const url = new URL(value, baseUrl);
+    if (!/\/azienda\/[^/?#]+/i.test(url.pathname)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export function parseRegistroAziendeSearchCandidates(
+  rows,
+  {
+    baseUrl = SEARCH_URL,
+    limit = 40
+  } = {}
+) {
+  const candidates = [];
+  const seen = new Set();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const cells = (row?.cells || []).map(clean).filter(Boolean);
+    const name = clean(row?.name || cells[0]);
+    const providerUrl = searchCandidateUrl(row?.href, baseUrl);
+
+    if (!name || !providerUrl) continue;
+
+    const key = providerUrl.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const location = clean(row?.location || cells[1]);
+    const locationParts = location
+      .split(",")
+      .map(clean)
+      .filter(Boolean);
+
+    candidates.push({
+      provider: "RegistroAziende.it",
+      providerUrl,
+      name,
+      vat: /^\d{11}$/.test(clean(row?.vat))
+        ? clean(row.vat)
+        : null,
+      city: locationParts[0] || null,
+      province: locationParts[1] || null,
+      address: null,
+      financials: {}
+    });
+  }
+
+  return Number.isFinite(limit) && limit > 0
+    ? candidates.slice(0, limit)
+    : candidates;
+}
+
 function normalizeSearchName(value) {
   return clean(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/\b(?:societa|srls?|spa|snc|sas|ss|scarl|srl|s\.r\.l\.?|s\.p\.a\.?)\b/g, " ")
+    .replace(/\b(?:societa|srls?|spa|snc|sas|ss|scarl|s\.r\.l\.?|s\.p\.a\.?)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-export function rankRegistroAziendeCompaniesByQuery(companies, query) {
+export function rankRegistroAziendeCompaniesByQuery(
+  companies,
+  query,
+  { limit = 5 } = {}
+) {
   const normalizedQuery = normalizeSearchName(query);
-  const queryTokens = normalizedQuery.split(" ").filter((token) => token.length >= 2);
+  const queryTokens = normalizedQuery
+    .split(" ")
+    .filter((token) => token.length >= 2);
 
   if (!normalizedQuery || !queryTokens.length) return [];
 
-  return (Array.isArray(companies) ? companies : [])
+  const ranked = (Array.isArray(companies) ? companies : [])
     .map((company, index) => {
       const normalizedName = normalizeSearchName(company?.name);
       if (!normalizedName) return null;
 
       const nameTokens = normalizedName.split(" ").filter(Boolean);
-      const matchedTokens = queryTokens.filter((token) =>
-        nameTokens.includes(token) || normalizedName.includes(token)
+      const tokenMatches = queryTokens.map((token) =>
+        nameTokens.some((nameToken) =>
+          nameToken === token ||
+          nameToken.startsWith(token) ||
+          token.startsWith(nameToken)
+        )
       );
 
-      const tokenCoverage = matchedTokens.length / queryTokens.length;
+      const matchedTokens = tokenMatches.filter(Boolean).length;
+      const tokenCoverage = matchedTokens / queryTokens.length;
       const exact = normalizedName === normalizedQuery;
       const startsWith = normalizedName.startsWith(normalizedQuery);
       const contains = normalizedName.includes(normalizedQuery);
+      const allTokensMatch = matchedTokens === queryTokens.length;
+
+      if (!allTokensMatch && !exact) return null;
 
       let score = tokenCoverage * 100;
-      if (exact) score += 100;
-      else if (startsWith) score += 45;
-      else if (contains) score += 30;
+      if (exact) score += 120;
+      else if (startsWith) score += 50;
+      else if (contains) score += 35;
+
+      // Prefer the shortest matching legal name when several entries contain
+      // all query tokens; this keeps exact corporate names ahead of verbose
+      // variants while preserving stable source order as the final tiebreaker.
+      score -= Math.max(0, normalizedName.length - normalizedQuery.length) * 0.2;
 
       return {
         company,
         index,
-        score,
-        tokenCoverage,
-        exact
+        score
       };
     })
     .filter(Boolean)
-    .filter((item) =>
-      item.exact ||
-      item.tokenCoverage >= 0.5 ||
-      (queryTokens.length === 1 && item.tokenCoverage === 1)
-    )
     .sort((a, b) =>
       b.score - a.score ||
       a.index - b.index
     )
-    .slice(0, 5)
     .map((item) => item.company);
-}
 
+  return Number.isFinite(limit) && limit > 0
+    ? ranked.slice(0, limit)
+    : ranked;
+}
 
 export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -602,72 +675,95 @@ export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
       clean(cell.textContent)
     );
     const anchor = row.querySelector('a[href*="/azienda/"]');
+    if (!anchor) continue;
 
     rows.push({
       cells,
-      name: clean(anchor?.textContent || cells[0]),
-      href: anchor?.getAttribute("href") || "",
+      name: clean(anchor.textContent || cells[0]),
+      href: anchor.getAttribute("href") || "",
       location: cells[1] || "",
       vat: cells.find((value) => /^\d{11}$/.test(value)) || ""
     });
   }
 
-  // The public search page is not guaranteed to use a semantic <table>.
-  // Fall back to each company link and walk up to the first container that
-  // contains exactly one VAT number, which isolates one search result card.
+  // Some layouts render results as cards instead of table rows. Keep only the
+  // company link itself here: VAT and full company data are verified later by
+  // opening the linked public company page, avoiding accidental association
+  // with VAT numbers belonging to neighbouring/recommended companies.
   for (const anchor of doc.querySelectorAll('a[href*="/azienda/"]')) {
     const href = anchor.getAttribute("href") || "";
     const name = clean(anchor.textContent);
     if (!name || !href) continue;
 
-    let container = anchor.parentElement;
-    let text = "";
-    let vat = "";
-
-    for (let depth = 0; container && depth < 6; depth += 1) {
-      text = clean(container.textContent, 800);
-      const vats = [...new Set(text.match(/\b\d{11}\b/g) || [])];
-
-      if (vats.length === 1) {
-        vat = vats[0];
-        break;
-      }
-
-      container = container.parentElement;
-    }
-
-    if (!vat || !container) continue;
-
-    const location = [...container.querySelectorAll("*")]
-      .map((node) => clean(node.textContent, 120))
-      .find((value) =>
-        value &&
-        value !== name &&
-        !/\b\d{11}\b/.test(value) &&
-        /^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ' .-]+,\s*[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ' .-]+$/.test(value)
-      ) || "";
-
     rows.push({
-      cells: [name, location, vat],
+      cells: [name],
       name,
       href,
-      location,
-      vat
+      location: "",
+      vat: ""
     });
   }
 
-  return parseRegistroAziendeSearchRows(rows, {
+  return parseRegistroAziendeSearchCandidates(rows, {
     baseUrl: url,
-    limit: 40
+    limit: 60
   });
+}
+
+function slugFromRegistroCompanyUrl(value) {
+  try {
+    const url = new URL(value, SEARCH_URL);
+    const match = url.pathname.match(/\/azienda\/([^/?#]+)/i);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSearchCandidates(candidates, query) {
+  const discovered = rankRegistroAziendeCompaniesByQuery(
+    candidates,
+    query,
+    { limit: 12 }
+  );
+
+  if (!discovered.length) return [];
+
+  const resolved = [];
+  const byVat = new Set();
+
+  for (let i = 0; i < discovered.length; i += 4) {
+    const batch = discovered.slice(i, i + 4);
+    const companies = await Promise.all(
+      batch.map(async (candidate) => {
+        const slug = slugFromRegistroCompanyUrl(candidate?.providerUrl);
+        if (!slug) return null;
+        return fetchSlug(slug);
+      })
+    );
+
+    for (const company of companies) {
+      if (!company?.vat || byVat.has(company.vat)) continue;
+      byVat.add(company.vat);
+      resolved.push(company);
+    }
+
+    if (resolved.length >= 8) break;
+  }
+
+  return rankRegistroAziendeCompaniesByQuery(
+    resolved,
+    query,
+    { limit: 5 }
+  );
 }
 
 export async function findRegistroAziendeCompaniesByName(query) {
   const normalizedQuery = clean(query);
-  if (normalizedQuery.length < 4) return [];
+  if (normalizedQuery.length < 3) return [];
 
   const cacheKey =
-    `registro:manual-search:v3:${normalizedQuery.toLowerCase()}`;
+    `registro:manual-search:v4:${normalizedQuery.toLowerCase()}`;
   const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
   if (cached !== undefined) return cached;
 
@@ -683,14 +779,29 @@ export async function findRegistroAziendeCompaniesByName(query) {
     if (!response.ok) return [];
 
     const html = await response.text();
-    const parsedCompanies = parseRegistroAziendeSearchPage(
+    const discovered = parseRegistroAziendeSearchPage(
       html,
       response.url || url
     );
-    const companies = rankRegistroAziendeCompaniesByQuery(
-      parsedCompanies,
+
+    let companies = await resolveSearchCandidates(
+      discovered,
       normalizedQuery
     );
+
+    // If the search page did not expose a usable result link, try the direct
+    // slug generated from the entered legal name. This helps short, exact
+    // names without weakening the relevance filter.
+    if (!companies.length) {
+      const direct = await fetchCandidates(
+        buildRegistroSlugCandidates([normalizedQuery], [])
+      );
+      companies = rankRegistroAziendeCompaniesByQuery(
+        direct,
+        normalizedQuery,
+        { limit: 5 }
+      );
+    }
 
     await writeCache(cacheKey, companies);
     return companies;
