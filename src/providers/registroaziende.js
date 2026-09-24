@@ -530,21 +530,66 @@ export function parseRegistroAziendeSearchRows(
 
 export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
   const doc = new DOMParser().parseFromString(html, "text/html");
+  const rows = [];
 
-  const rows = [...doc.querySelectorAll("tr")].map((row) => {
+  for (const row of doc.querySelectorAll("tr")) {
     const cells = [...row.querySelectorAll("td")].map((cell) =>
       clean(cell.textContent)
     );
     const anchor = row.querySelector('a[href*="/azienda/"]');
 
-    return {
+    rows.push({
       cells,
       name: clean(anchor?.textContent || cells[0]),
       href: anchor?.getAttribute("href") || "",
       location: cells[1] || "",
       vat: cells.find((value) => /^\d{11}$/.test(value)) || ""
-    };
-  });
+    });
+  }
+
+  // The public search page is not guaranteed to use a semantic <table>.
+  // Fall back to each company link and walk up to the first container that
+  // contains exactly one VAT number, which isolates one search result card.
+  for (const anchor of doc.querySelectorAll('a[href*="/azienda/"]')) {
+    const href = anchor.getAttribute("href") || "";
+    const name = clean(anchor.textContent);
+    if (!name || !href) continue;
+
+    let container = anchor.parentElement;
+    let text = "";
+    let vat = "";
+
+    for (let depth = 0; container && depth < 6; depth += 1) {
+      text = clean(container.textContent, 800);
+      const vats = [...new Set(text.match(/\b\d{11}\b/g) || [])];
+
+      if (vats.length === 1) {
+        vat = vats[0];
+        break;
+      }
+
+      container = container.parentElement;
+    }
+
+    if (!vat || !container) continue;
+
+    const location = [...container.querySelectorAll("*")]
+      .map((node) => clean(node.textContent, 120))
+      .find((value) =>
+        value &&
+        value !== name &&
+        !/\b\d{11}\b/.test(value) &&
+        /^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ' .-]+,\s*[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ' .-]+$/.test(value)
+      ) || "";
+
+    rows.push({
+      cells: [name, location, vat],
+      name,
+      href,
+      location,
+      vat
+    });
+  }
 
   return parseRegistroAziendeSearchRows(rows, { baseUrl: url });
 }
@@ -554,7 +599,7 @@ export async function findRegistroAziendeCompaniesByName(query) {
   if (normalizedQuery.length < 4) return [];
 
   const cacheKey =
-    `registro:manual-search:v1:${normalizedQuery.toLowerCase()}`;
+    `registro:manual-search:v2:${normalizedQuery.toLowerCase()}`;
   const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
   if (cached !== undefined) return cached;
 
