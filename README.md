@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.1`.
+Versione `0.9.2`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -373,3 +373,19 @@ La 0.9.1:
 - aggiunge un fallback basato sui link alle schede `/azienda/...`;
 - risale al contenitore del singolo risultato e ne estrae P.IVA e località;
 - invalida la cache delle ricerche manuali precedenti, così eventuali risultati vuoti della 0.9.0 non restano memorizzati.
+
+
+## Manual search relevance 0.9.2
+
+La ricerca manuale per ragione sociale filtra e ordina ora i risultati in base alla somiglianza con il testo inserito.
+
+Il fallback HTML introdotto in 0.9.1 poteva raccogliere anche link aziendali non pertinenti presenti nella stessa pagina. In casi reali, cercando `future tech srl`, potevano quindi comparire società completamente scollegate.
+
+La 0.9.2:
+- estrae più candidati dalla pagina di ricerca prima di limitarli;
+- normalizza ragione sociale e forma giuridica;
+- calcola la copertura dei termini cercati;
+- mette in cima le corrispondenze esatte o quasi esatte;
+- scarta le aziende senza sufficiente sovrapposizione con la query;
+- limita a 5 solo dopo il ranking;
+- invalida nuovamente la cache della ricerca manuale.

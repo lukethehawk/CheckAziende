@@ -478,7 +478,10 @@ async function fetchCandidates(slugs) {
 
 export function parseRegistroAziendeSearchRows(
   rows,
-  { baseUrl = SEARCH_URL } = {}
+  {
+    baseUrl = SEARCH_URL,
+    limit = 5
+  } = {}
 ) {
   const companies = [];
   const byVat = new Set();
@@ -525,8 +528,70 @@ export function parseRegistroAziendeSearchRows(
     });
   }
 
-  return companies.slice(0, 5);
+  return Number.isFinite(limit) && limit > 0
+    ? companies.slice(0, limit)
+    : companies;
 }
+
+function normalizeSearchName(value) {
+  return clean(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(?:societa|srls?|spa|snc|sas|ss|scarl|srl|s\.r\.l\.?|s\.p\.a\.?)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function rankRegistroAziendeCompaniesByQuery(companies, query) {
+  const normalizedQuery = normalizeSearchName(query);
+  const queryTokens = normalizedQuery.split(" ").filter((token) => token.length >= 2);
+
+  if (!normalizedQuery || !queryTokens.length) return [];
+
+  return (Array.isArray(companies) ? companies : [])
+    .map((company, index) => {
+      const normalizedName = normalizeSearchName(company?.name);
+      if (!normalizedName) return null;
+
+      const nameTokens = normalizedName.split(" ").filter(Boolean);
+      const matchedTokens = queryTokens.filter((token) =>
+        nameTokens.includes(token) || normalizedName.includes(token)
+      );
+
+      const tokenCoverage = matchedTokens.length / queryTokens.length;
+      const exact = normalizedName === normalizedQuery;
+      const startsWith = normalizedName.startsWith(normalizedQuery);
+      const contains = normalizedName.includes(normalizedQuery);
+
+      let score = tokenCoverage * 100;
+      if (exact) score += 100;
+      else if (startsWith) score += 45;
+      else if (contains) score += 30;
+
+      return {
+        company,
+        index,
+        score,
+        tokenCoverage,
+        exact
+      };
+    })
+    .filter(Boolean)
+    .filter((item) =>
+      item.exact ||
+      item.tokenCoverage >= 0.5 ||
+      (queryTokens.length === 1 && item.tokenCoverage === 1)
+    )
+    .sort((a, b) =>
+      b.score - a.score ||
+      a.index - b.index
+    )
+    .slice(0, 5)
+    .map((item) => item.company);
+}
+
 
 export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -591,7 +656,10 @@ export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
     });
   }
 
-  return parseRegistroAziendeSearchRows(rows, { baseUrl: url });
+  return parseRegistroAziendeSearchRows(rows, {
+    baseUrl: url,
+    limit: 40
+  });
 }
 
 export async function findRegistroAziendeCompaniesByName(query) {
@@ -599,7 +667,7 @@ export async function findRegistroAziendeCompaniesByName(query) {
   if (normalizedQuery.length < 4) return [];
 
   const cacheKey =
-    `registro:manual-search:v2:${normalizedQuery.toLowerCase()}`;
+    `registro:manual-search:v3:${normalizedQuery.toLowerCase()}`;
   const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
   if (cached !== undefined) return cached;
 
@@ -615,9 +683,13 @@ export async function findRegistroAziendeCompaniesByName(query) {
     if (!response.ok) return [];
 
     const html = await response.text();
-    const companies = parseRegistroAziendeSearchPage(
+    const parsedCompanies = parseRegistroAziendeSearchPage(
       html,
       response.url || url
+    );
+    const companies = rankRegistroAziendeCompaniesByQuery(
+      parsedCompanies,
+      normalizedQuery
     );
 
     await writeCache(cacheKey, companies);
