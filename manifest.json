@@ -21,7 +21,13 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "checkaziende@lukethehawk.github"
+      "id": "checkaziende@lukethehawk.github",
+      "data_collection_permissions": {
+        "required": [
+          "websiteContent",
+          "browsingActivity"
+        ]
+      }
     }
   },
   "icons": {
