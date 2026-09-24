@@ -406,6 +406,8 @@ Corretto inoltre il cambio azienda durante una ricerca manuale: se la nuova soci
 
 ## Short-name search e indirizzi completi 0.9.4
 
-La ricerca manuale gestisce meglio le ragioni sociali molto corte. Per nomi esatti di tre caratteri, ad esempio `EPY`, il provider prova anche varianti con forma giuridica (`EPY SRL`, `EPY SRLS`, `EPY SPA`, `EPY SNC`, `EPY SAS`) mantenendo il ranking sulla query originale. La cache della ricerca manuale viene invalidata (`v5`).
+La ricerca manuale gestisce meglio sia le ragioni sociali corte sia i nomi privi di forma giuridica. Se l'utente inserisce un nome senza suffisso societario, il provider prova anche varianti comuni (`SRL`, `SRLS`, `SPA`, `SNC`, `SAS`) mantenendo il ranking sulla query originale. Questo copre casi come `EPY`, `Rubino` e `Omnitekstore`. Il matching ignora inoltre token troppo corti, evitando falsi positivi come la congiunzione `E` che in precedenza poteva far passare un risultato non pertinente. La cache della ricerca manuale viene invalidata (`v6`).
+
+Le verifiche dei risultati vengono effettuate in piccoli batch e i fallimenti HTTP transitori non vengono più memorizzati come miss per 24 ore, evitando che un rate limit temporaneo renda una società apparentemente introvabile.
 
 La visualizzazione della sede completa inoltre gli indirizzi parziali del provider canonico usando città e provincia già ottenute dalle fonti di fallback. Un indirizzo come `Via Margherita Viganò De Vizzi, 93/95 -` può quindi essere completato con `Cinisello Balsamo (MI)` quando questi dati sono disponibili da RegistroAziende/REA, senza duplicare località già presenti.
