@@ -415,12 +415,12 @@ function inferCompanyName(text, lines, fallbackName = null) {
     if (value) return value;
   }
 
-  const labeled = sanitizeField(findLabelValue(lines, ["Ragione Sociale"]));
-  if (labeled) return labeled;
-
-  return sanitizeField(
+  const fallback = sanitizeField(
     String(fallbackName || "").replace(/\s+Fatturato\s*$/i, "")
   );
+  if (fallback) return fallback;
+
+  return sanitizeField(findLabelValue(lines, ["Ragione Sociale"]));
 }
 
 function inferCompanyRea(lines, text, chamber) {
