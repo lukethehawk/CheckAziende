@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.4`.
+Versione `0.9.5`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -411,3 +411,13 @@ La ricerca manuale gestisce meglio sia le ragioni sociali corte sia i nomi privi
 Le verifiche dei risultati vengono effettuate in piccoli batch e i fallimenti HTTP transitori non vengono più memorizzati come miss per 24 ore, evitando che un rate limit temporaneo renda una società apparentemente introvabile.
 
 La visualizzazione della sede completa inoltre gli indirizzi parziali del provider canonico usando città e provincia già ottenute dalle fonti di fallback. Un indirizzo come `Via Margherita Viganò De Vizzi, 93/95 -` può quindi essere completato con `Cinisello Balsamo (MI)` quando questi dati sono disponibili da RegistroAziende/REA, senza duplicare località già presenti.
+
+
+## Manual search hardening 0.9.5
+
+La 0.9.5 consolida le correzioni della ricerca manuale per ragione sociale:
+- i nomi senza forma giuridica vengono ritentati con suffissi societari comuni;
+- il matching dei token non considera più prefissi troppo corti, evitando falsi positivi come `E` → `EPY`;
+- le verifiche dei candidati su RegistroAziende vengono effettuate in batch più piccoli;
+- errori HTTP transitori non vengono memorizzati come miss di lunga durata;
+- cache delle ricerche e delle schede RegistroAziende invalidate.
