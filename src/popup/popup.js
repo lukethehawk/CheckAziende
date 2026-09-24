@@ -77,6 +77,7 @@ const elements = {
   input: document.querySelector("#vat-input"),
   button: document.querySelector("#check-button"),
   financialSection: document.querySelector("#financial-section"),
+  revenueBlock: document.querySelector("#revenue-block"),
   revenueValue: document.querySelector("#revenue-value"),
   revenueLabel: document.querySelector("#revenue-label"),
   employeesCard: document.querySelector("#employees-card"),
@@ -475,22 +476,34 @@ function renderFinancials(financials) {
     hasRevenuePerEmployee;
 
   elements.financialSection.classList.toggle("hidden", !hasAny);
-  if (!hasAny) return;
+  elements.revenueBlock.classList.toggle("hidden", !hasRevenue);
+  elements.employeesCard.classList.toggle("hidden", !hasEmployees);
+  elements.profitCard.classList.toggle("hidden", !hasProfit);
+  elements.ebitdaCard.classList.toggle("hidden", !hasEbitda);
+  elements.ebitdaMarginCard.classList.toggle("hidden", !hasEbitdaMargin);
+  elements.revenuePerEmployeeCard.classList.toggle(
+    "hidden",
+    !hasRevenuePerEmployee
+  );
+  elements.marginCard.classList.toggle("hidden", !hasMargin);
 
-  if (hasRevenue) {
+  if (!hasRevenue) {
+    elements.revenueValue.textContent = "—";
+    elements.revenueLabel.textContent = "Fatturato";
+  } else {
     elements.revenueValue.textContent = formatCompactCurrency(revenue.value);
     elements.revenueLabel.textContent = revenue.year
       ? `Fatturato ${revenue.year}`
       : "Fatturato";
   }
 
-  elements.employeesCard.classList.toggle("hidden", !hasEmployees);
+  if (!hasAny) return;
+
   if (hasEmployees) {
     elements.employeesValue.textContent =
       employees.display || String(employees.value);
   }
 
-  elements.profitCard.classList.toggle("hidden", !hasProfit);
   elements.profitValue.classList.remove("financial-positive", "financial-negative");
   if (hasProfit) {
     const isLoss = profit.value < 0;
@@ -505,7 +518,6 @@ function renderFinancials(financials) {
         : "utile";
   }
 
-  elements.ebitdaCard.classList.toggle("hidden", !hasEbitda);
   if (hasEbitda) {
     elements.ebitdaValue.textContent = formatCompactCurrency(ebitda.value);
     elements.ebitdaLabel.textContent = ebitda.year
@@ -513,7 +525,6 @@ function renderFinancials(financials) {
       : "EBITDA";
   }
 
-  elements.ebitdaMarginCard.classList.toggle("hidden", !hasEbitdaMargin);
   if (hasEbitdaMargin) {
     elements.ebitdaMarginValue.textContent = formatPercent(ebitdaMargin.value);
     elements.ebitdaMarginLabel.textContent = ebitdaMargin.year
@@ -521,16 +532,11 @@ function renderFinancials(financials) {
       : "EBITDA margin";
   }
 
-  elements.revenuePerEmployeeCard.classList.toggle(
-    "hidden",
-    !hasRevenuePerEmployee
-  );
   if (hasRevenuePerEmployee) {
     elements.revenuePerEmployeeValue.textContent =
       formatCompactCurrency(revenuePerEmployee);
   }
 
-  elements.marginCard.classList.toggle("hidden", !hasMargin);
   if (hasMargin) elements.marginValue.textContent = formatPercent(margin);
 }
 
@@ -756,7 +762,7 @@ function renderCompany(
   );
   renderProviderSource(company);
   renderFinancialProfile(company?.evaluation, company?.financials);
-  renderContacts(currentScan);
+  renderContacts(source === "manual" ? null : currentScan);
 
   elements.companyView.classList.remove("hidden");
   companyIsVisible = true;
@@ -1057,9 +1063,9 @@ async function runManualSearch() {
     return;
   }
 
-  if (query.length < 4) {
+  if (query.length < 3) {
     setManualSearchStatus(
-      "Inserisci almeno 4 caratteri per cercare una ragione sociale.",
+      "Inserisci almeno 3 caratteri per cercare una ragione sociale.",
       { error: true }
     );
     return;
