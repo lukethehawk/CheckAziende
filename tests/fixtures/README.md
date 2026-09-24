@@ -6,8 +6,8 @@ Non sono copie integrali delle pagine pubbliche: contengono soltanto la struttur
 
 Casi coperti:
 
-- Future Tech: anagrafica Aziende.it + bilancio RegistroAziende;
-- Rubino: Aziende.it + Xray Finance;
+- Future Tech: anagrafica CompanyReports.it + bilancio RegistroAziende;
+- Rubino: CompanyReports.it + Xray Finance;
 - MPS Monitor: storico RegistroAziende;
 - profilo azienda su Xray: la P.IVA della società mostrata non deve diventare proprietario del sito;
 - portale Creditsafe su sottodominio: dominio/brand devono produrre solo una corrispondenza prudente;
