@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import {
   buildRegistroSlugCandidates,
   parseRegistroAziendeSearchRows,
-  parseRegistroAziendeText
+  parseRegistroAziendeText,
+  rankRegistroAziendeCompaniesByQuery
 } from "../src/providers/registroaziende.js";
 
 test("builds RegistroAziende slug from company and city", () => {
@@ -197,4 +198,35 @@ test("manual search rows accept card-style extracted results", () => {
   assert.equal(companies[0].vat, "11295150152");
   assert.equal(companies[0].city, "BASIGLIO");
   assert.equal(companies[0].province, "Milano");
+});
+
+
+test("manual company search prioritizes names matching the query", () => {
+  const ranked = rankRegistroAziendeCompaniesByQuery([
+    { name: "Isafe Srl", vat: "05070160261" },
+    { name: "Gran Garage Carlo Mazzeo Srl", vat: "03170010734" },
+    { name: "Future Tech Srl", vat: "11295150152" },
+    { name: "New Investment Srl", vat: "02522610217" },
+    { name: "Ristonami Srl", vat: "05866040651" },
+    { name: "Annachiara Elmy Srl", vat: "04934100282" }
+  ], "future tech srl");
+
+  assert.deepEqual(
+    ranked.map((company) => company.vat),
+    ["11295150152"]
+  );
+});
+
+test("manual company search keeps close variants but rejects unrelated companies", () => {
+  const ranked = rankRegistroAziendeCompaniesByQuery([
+    { name: "Future Tech Srl", vat: "11295150152" },
+    { name: "Future Technology Srl", vat: "08714741215" },
+    { name: "Future Srl", vat: "00874460967" },
+    { name: "Tecnologie Future Srl", vat: "00941350571" },
+    { name: "Gran Garage Carlo Mazzeo Srl", vat: "03170010734" }
+  ], "future tech");
+
+  assert.equal(ranked[0].vat, "11295150152");
+  assert.ok(ranked.some((company) => company.vat === "08714741215"));
+  assert.ok(!ranked.some((company) => company.vat === "03170010734"));
 });
