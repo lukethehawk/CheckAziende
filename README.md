@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.3`.
+Versione `0.9.4`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -402,3 +402,10 @@ La ricerca manuale per ragione sociale viene resa più rigorosa e i risultati ve
 - la cache della ricerca manuale viene invalidata (`v4`).
 
 Corretto inoltre il cambio azienda durante una ricerca manuale: se la nuova società non dispone di fatturato, il popup non conserva più il valore visualizzato per la società precedente. Il blocco fatturato viene nascosto e azzerato quando il dato non è disponibile. Durante una ricerca manuale vengono anche nascosti i contatti letti dal sito aperto, perché potrebbero appartenere a un'azienda diversa da quella cercata.
+
+
+## Short-name search e indirizzi completi 0.9.4
+
+La ricerca manuale gestisce meglio le ragioni sociali molto corte. Per nomi esatti di tre caratteri, ad esempio `EPY`, il provider prova anche varianti con forma giuridica (`EPY SRL`, `EPY SRLS`, `EPY SPA`, `EPY SNC`, `EPY SAS`) mantenendo il ranking sulla query originale. La cache della ricerca manuale viene invalidata (`v5`).
+
+La visualizzazione della sede completa inoltre gli indirizzi parziali del provider canonico usando città e provincia già ottenute dalle fonti di fallback. Un indirizzo come `Via Margherita Viganò De Vizzi, 93/95 -` può quindi essere completato con `Cinisello Balsamo (MI)` quando questi dati sono disponibili da RegistroAziende/REA, senza duplicare località già presenti.
