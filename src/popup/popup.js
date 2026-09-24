@@ -10,6 +10,7 @@ import {
   resolveCompanyProviders
 } from "../providers/orchestrator.js";
 import {
+  completeCompanyAddress,
   distinctTaxCode,
   enrichCompanyWithFallback,
   enrichCompanyWithXray,
@@ -706,7 +707,7 @@ function renderCompany(
 ) {
   const vat = company?.vat || digitsOnly(elements.input.value);
   const name = fallbackCompanyName(company, source);
-  const address = company?.address || "";
+  const address = completeCompanyAddress(company);
 
   elements.unidentifiedView.classList.add("hidden");
   elements.name.textContent = name;

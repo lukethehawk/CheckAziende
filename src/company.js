@@ -12,6 +12,67 @@ function unique(values) {
 }
 
 
+export function completeCompanyAddress(company) {
+  const rawAddress = String(company?.address || "").trim();
+  const baseAddress = rawAddress.replace(/[\s,;\-]+$/g, "").trim();
+  const city = String(company?.city || "").trim();
+  const province = String(company?.province || "").trim();
+  const chamber = String(company?.chamber || "").trim();
+  const rea = String(company?.rea || "").trim();
+
+  const provinceCode =
+    (/^[A-Z]{2}$/i.test(chamber) && chamber.toUpperCase()) ||
+    rea.match(/^([A-Z]{2})[-\s]/i)?.[1]?.toUpperCase() ||
+    (/^[A-Z]{2}$/i.test(province) && province.toUpperCase()) ||
+    "";
+
+  const normalize = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  const normalizedBase = normalize(baseAddress);
+  const normalizedCity = normalize(city);
+  const normalizedProvince = normalize(province);
+
+  const missingCity =
+    city &&
+    normalizedCity &&
+    !normalizedBase.includes(normalizedCity);
+
+  const hasProvinceCode =
+    provinceCode &&
+    new RegExp(`(?:\\(|\\b)${provinceCode}(?:\\)|\\b)`, "i")
+      .test(baseAddress);
+
+  const missingProvince =
+    !hasProvinceCode &&
+    (
+      provinceCode ||
+      (
+        province &&
+        normalizedProvince &&
+        !normalizedBase.includes(normalizedProvince)
+      )
+    );
+
+  const location = [
+    missingCity ? city : "",
+    missingProvince
+      ? provinceCode
+        ? `(${provinceCode})`
+        : province
+      : ""
+  ].filter(Boolean).join(" ");
+
+  if (baseAddress && location) return `${baseAddress} - ${location}`;
+  return baseAddress || location || "";
+}
+
+
 export function distinctTaxCode(taxCode, vat) {
   const value = String(taxCode || "").trim();
   if (!value) return null;

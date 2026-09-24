@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildRegistroManualSearchQueries,
   buildRegistroSlugCandidates,
   parseRegistroAziendeSearchCandidates,
   parseRegistroAziendeSearchRows,
@@ -275,5 +276,20 @@ test("manual search supports exact three-character company names", () => {
   assert.deepEqual(
     ranked.map((company) => company.vat),
     ["05973540155", "13237730018"]
+  );
+});
+
+
+test("short manual company names are expanded with legal-form variants", () => {
+  assert.deepEqual(
+    buildRegistroManualSearchQueries("epy"),
+    ["epy", "epy srl", "epy srls", "epy spa", "epy snc", "epy sas"]
+  );
+});
+
+test("normal-length manual searches are not expanded unnecessarily", () => {
+  assert.deepEqual(
+    buildRegistroManualSearchQueries("future tech"),
+    ["future tech"]
   );
 });

@@ -758,16 +758,36 @@ async function resolveSearchCandidates(candidates, query) {
   );
 }
 
-export async function findRegistroAziendeCompaniesByName(query) {
+export function buildRegistroManualSearchQueries(query) {
   const normalizedQuery = clean(query);
   if (normalizedQuery.length < 3) return [];
 
-  const cacheKey =
-    `registro:manual-search:v4:${normalizedQuery.toLowerCase()}`;
-  const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
-  if (cached !== undefined) return cached;
+  const normalizedName = normalizeSearchName(normalizedQuery);
+  const tokens = normalizedName.split(" ").filter(Boolean);
 
-  const url = `${SEARCH_URL}?q=${encodeURIComponent(normalizedQuery)}`;
+  // RegistroAziende's public search is less reliable for very short bare
+  // company names. For an exact three-character name, retry with common legal
+  // forms so the public search can surface the city-specific company pages.
+  if (
+    normalizedName.length === 3 &&
+    tokens.length === 1 &&
+    normalizedQuery.toLowerCase() === normalizedName
+  ) {
+    return unique([
+      normalizedQuery,
+      `${normalizedQuery} srl`,
+      `${normalizedQuery} srls`,
+      `${normalizedQuery} spa`,
+      `${normalizedQuery} snc`,
+      `${normalizedQuery} sas`
+    ]);
+  }
+
+  return [normalizedQuery];
+}
+
+async function searchRegistroAziendeByQuery(searchQuery, rankingQuery) {
+  const url = `${SEARCH_URL}?q=${encodeURIComponent(searchQuery)}`;
 
   try {
     const response = await fetch(url, {
@@ -784,17 +804,70 @@ export async function findRegistroAziendeCompaniesByName(query) {
       response.url || url
     );
 
-    let companies = await resolveSearchCandidates(
+    return resolveSearchCandidates(
       discovered,
-      normalizedQuery
+      rankingQuery
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function findRegistroAziendeCompaniesByName(query) {
+  const normalizedQuery = clean(query);
+  if (normalizedQuery.length < 3) return [];
+
+  const cacheKey =
+    `registro:manual-search:v5:${normalizedQuery.toLowerCase()}`;
+  const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
+  if (cached !== undefined) return cached;
+
+  try {
+    const searchQueries = buildRegistroManualSearchQueries(normalizedQuery);
+    const byVat = new Map();
+
+    for (const searchQuery of searchQueries) {
+      const results = await searchRegistroAziendeByQuery(
+        searchQuery,
+        normalizedQuery
+      );
+
+      for (const company of results) {
+        if (!company?.vat || byVat.has(company.vat)) continue;
+        byVat.set(company.vat, company);
+      }
+
+      // For normal-length queries one successful search is enough. For a
+      // three-character company name, keep trying the legal-form expansions
+      // only while no relevant company has been found yet.
+      if (
+        byVat.size > 0 &&
+        searchQueries.length === 1
+      ) {
+        break;
+      }
+
+      if (
+        byVat.size > 0 &&
+        searchQueries.length > 1 &&
+        searchQuery !== normalizedQuery
+      ) {
+        break;
+      }
+    }
+
+    let companies = rankRegistroAziendeCompaniesByQuery(
+      [...byVat.values()],
+      normalizedQuery,
+      { limit: 5 }
     );
 
-    // If the search page did not expose a usable result link, try the direct
-    // slug generated from the entered legal name. This helps short, exact
-    // names without weakening the relevance filter.
+    // If the search page did not expose a usable result link, try direct slugs
+    // from both the entered name and the short-name legal-form expansions.
     if (!companies.length) {
+      const directNames = buildRegistroManualSearchQueries(normalizedQuery);
       const direct = await fetchCandidates(
-        buildRegistroSlugCandidates([normalizedQuery], [])
+        buildRegistroSlugCandidates(directNames, [])
       );
       companies = rankRegistroAziendeCompaniesByQuery(
         direct,

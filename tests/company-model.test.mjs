@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   calculatePersonnelCostRatio,
+  completeCompanyAddress,
   distinctTaxCode,
   enrichCompanyWithFallback,
   enrichCompanyWithXray,
@@ -200,5 +201,34 @@ test("tax code is hidden when it duplicates VAT and kept when distinct", () => {
   assert.equal(
     distinctTaxCode("RSSMRA80A01F205X", "11295150152"),
     "RSSMRA80A01F205X"
+  );
+});
+
+
+test("completes partial canonical address with fallback city and province code", () => {
+  const address = completeCompanyAddress({
+    address: "Via Margherita Viganò De Vizzi, 93/95 -",
+    city: "Cinisello Balsamo",
+    province: "Milano",
+    rea: "MI-1234567"
+  });
+
+  assert.equal(
+    address,
+    "Via Margherita Viganò De Vizzi, 93/95 - Cinisello Balsamo (MI)"
+  );
+});
+
+test("does not duplicate city and province in an already complete address", () => {
+  const address = completeCompanyAddress({
+    address: "Via Residenza Acacie, 601 - Basiglio (MI)",
+    city: "Basiglio",
+    province: "Milano",
+    rea: "MI-1453877"
+  });
+
+  assert.equal(
+    address,
+    "Via Residenza Acacie, 601 - Basiglio (MI)"
   );
 });
