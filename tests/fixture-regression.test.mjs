@@ -34,12 +34,12 @@ import {
 } from "./helpers/fixtures.mjs";
 
 test("fixture: Future Tech keeps canonical data and promotes newer filed year", async () => {
-  const aziendeHtml = await loadFixture("aziende/future-tech.html");
+  const aziendeHtml = await loadFixture("companyreports/future-tech.html");
   const registroHtml = await loadFixture("registro/future-tech.html");
 
   const aziende = parseAziendeText(htmlToText(aziendeHtml), {
     name: "FUTURE TECH SRL",
-    url: "https://www.aziende.it/future-tech-srl"
+    url: "https://www.companyreports.it/11295150152"
   });
   const registro = parseRegistroAziendeText(
     htmlToText(registroHtml),
@@ -71,13 +71,13 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
   assert.notEqual(describeFinancialProfile(evaluation).key, "limited");
 });
 
-test("fixture: Rubino keeps Xray enrichment after canonical Aziende data", async () => {
-  const aziendeHtml = await loadFixture("aziende/rubino.html");
+test("fixture: Rubino keeps Xray enrichment after canonical CompanyReports data", async () => {
+  const aziendeHtml = await loadFixture("companyreports/rubino.html");
   const xrayHtml = await loadFixture("xray/rubino.html");
 
   const aziende = parseAziendeText(htmlToText(aziendeHtml), {
     name: "RUBINO - S.R.L.",
-    url: "https://www.aziende.it/rubino-s-r-l-SA"
+    url: "https://www.companyreports.it/05488440651"
   });
   const xray = parseXrayText(htmlToText(xrayHtml), {
     name: "RUBINO S.R.L.",
