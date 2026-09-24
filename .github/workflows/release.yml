@@ -31,8 +31,8 @@ jobs:
           VERSION=$(node -p "require('./manifest.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build store packages
-        run: npm run build:stores
+      - name: Build and validate store packages
+        run: npm run validate:stores
 
       - name: Create store ZIP files
         shell: bash
