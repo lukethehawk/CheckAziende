@@ -245,22 +245,16 @@ export function scanCurrentPage() {
       .test(pageContextText);
 
   const candidates = new Map();
+  const legalCandidates = new Map();
   extractStructuredCandidates(candidates);
 
   for (const node of legalNodes) {
     const text = node.innerText || node.textContent || "";
-    collectLabeledVat(text, "footer/area legale", candidates, 120);
+    collectLabeledVat(text, "footer/area legale", legalCandidates, 120);
   }
 
-  // Search/directory pages can legitimately show VAT numbers for third-party
-  // companies. On those pages keep only owner-level evidence from legal/footer
-  // or structured metadata, and never infer the site owner from page content.
-  if (looksLikeSearchOrDirectoryPage) {
-    for (const [vat, candidate] of [...candidates.entries()]) {
-      if (!["vat_structured", "vat_metadata", "vat_legal"].includes(candidate.evidenceType)) {
-        candidates.delete(vat);
-      }
-    }
+  for (const candidate of legalCandidates.values()) {
+    upsertCandidate(candidates, candidate);
   }
 
   for (const node of document.querySelectorAll("meta[content]")) {
@@ -274,6 +268,18 @@ export function scanCurrentPage() {
 
     if (!/(?:vat|partita.?iva|tax.?id)/i.test(key)) continue;
     collectStructuredVat(node.getAttribute("content") || "", "metadati", candidates);
+  }
+
+  // On search/directory pages, structured data and metadata commonly describe
+  // the third-party companies listed on the page rather than the site owner.
+  // Keep only VAT evidence read from an actual legal/footer area. If that area
+  // is not semantic, clearing the third-party candidates lets the strong
+  // textual-footer fallback below inspect the tail of the page.
+  if (looksLikeSearchOrDirectoryPage) {
+    candidates.clear();
+    for (const candidate of legalCandidates.values()) {
+      upsertCandidate(candidates, candidate);
+    }
   }
 
   if (!candidates.size) {
