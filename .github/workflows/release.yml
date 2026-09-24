@@ -38,6 +38,7 @@ jobs:
           zip -r "dist/CheckAziende-${{ steps.version.outputs.version }}.zip" \
             manifest.json \
             src \
+            assets \
             LICENSE \
             README.md
 

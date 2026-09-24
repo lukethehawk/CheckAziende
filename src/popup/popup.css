@@ -48,18 +48,22 @@ a {
 }
 
 .brand {
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
 }
 
-.brand-mark {
-  width: 18px;
-  height: 18px;
+.brand-icon {
+  width: 31px;
+  height: 31px;
   flex: 0 0 auto;
-  border-radius: 5px;
-  background: #4267df;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  object-fit: contain;
 }
+
+.brand-copy {
+  min-width: 0;
+}
+
+
 
 h1,
 h2,
@@ -68,13 +72,19 @@ p {
 }
 
 h1 {
-  font-size: 15px;
-  line-height: 1.2;
-  font-weight: 750;
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1.15;
+  font-weight: 850;
+  letter-spacing: -0.035em;
+  background: linear-gradient(90deg, #0a3288 0%, #0f4dbd 44%, #1179ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 #page-host {
-  margin-top: 2px;
+  margin-top: 3px;
   max-width: 245px;
   overflow: hidden;
   text-overflow: ellipsis;
