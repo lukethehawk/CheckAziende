@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.4`.
+Versione `0.8.5`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -333,3 +333,16 @@ La versione 0.8.4 espone alcuni dati già disponibili dal provider CompanyReport
 - il campo precedentemente etichettato **Iscrizione** viene mostrato come **Costituzione**, coerentemente con il dato `Fondazione` fornito da CompanyReports.
 
 Il rapporto costo personale / fatturato conserva il riferimento allo stesso esercizio anche quando RegistroAziende promuove un fatturato più recente come dato principale.
+
+
+## Directory owner detection 0.8.5
+
+Corretto un caso reale in cui una homepage directory poteva contenere dati strutturati relativi alle aziende elencate e, contemporaneamente, la P.IVA del proprietario del sito nel footer.
+
+Sulle pagine riconosciute come directory/ricerca:
+- i VAT presenti in JSON-LD o metadati della pagina non vengono più usati come candidati proprietario del sito;
+- una P.IVA trovata in un vero footer/area legale mantiene priorità;
+- se il footer non è semanticamente marcato, il fallback sulla coda testuale della pagina resta attivo;
+- quando la coda contiene più P.IVA, viene privilegiata l'ultima occorrenza con forte contesto legale, tipicamente quella del footer.
+
+È presente un test di regressione sul caso `aziende.it`, dove il proprietario del sito è Ad Intend Srl (P.IVA 02357550066) ma la pagina contiene anche dati di società terze.
