@@ -46,7 +46,7 @@ function findLabelEntry(lines, labels) {
       if (lower.startsWith(label + " ")) {
         const inline = clean(line.slice(label.length)).replace(/^:\s*/, "");
 
-        if (/^\(\s*20\d{2}\s*\)$/.test(inline)) {
+        if (/^(?:\(\s*)?20\d{2}(?:\s*\))?$/.test(inline)) {
           return {
             labelLine: line,
             value: lines[i + 1] || null,
