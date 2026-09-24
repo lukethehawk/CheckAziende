@@ -241,7 +241,30 @@ function inferAteco(text, lines) {
   return { code: code || null, description: description || null };
 }
 
+function isCompanyReportsLayout(lines) {
+  return lines.some((line) =>
+    /^(?:Stato Attività|Stato Attivita|Forma giuridica|Attività prevalente|Attivita prevalente|Fondazione|CamCom|N\.\s*Dipendenti)(?:\s|$)/i.test(line)
+  );
+}
+
 function inferRevenue(lines) {
+  const companyReportsLayout = isCompanyReportsLayout(lines);
+  const entry = findLabelEntry(lines, ["Fatturato"]);
+
+  if (companyReportsLayout && entry?.value && !/^N\.?D\.?$/i.test(entry.value)) {
+    const amount = parseMoney(entry.value);
+    const yearMatch = `${entry.labelLine} ${entry.value}`.match(/\b(20\d{2})\b/);
+
+    if (amount !== null) {
+      return {
+        value: amount,
+        year: yearMatch ? Number(yearMatch[1]) : null,
+        source: PROVIDER_NAME,
+        isFiled: true
+      };
+    }
+  }
+
   const legacyValue = findMoneyBefore(lines, /^Fatturato\s+20\d{2}$/i);
   const legacyYear = findYearFromLine(lines, /^Fatturato\s+20\d{2}$/i);
 
@@ -254,7 +277,6 @@ function inferRevenue(lines) {
     };
   }
 
-  const entry = findLabelEntry(lines, ["Fatturato"]);
   if (!entry?.value || /^N\.?D\.?$/i.test(entry.value)) return null;
 
   const amount = parseMoney(entry.value);
@@ -269,6 +291,28 @@ function inferRevenue(lines) {
 }
 
 function inferProfit(lines) {
+  const companyReportsLayout = isCompanyReportsLayout(lines);
+  const entry = findLabelEntry(lines, [
+    "Utile",
+    "Utile/Perdita",
+    "Risultato d'esercizio",
+    "Risultato di esercizio"
+  ]);
+
+  if (companyReportsLayout && entry?.value && !/^N\.?D\.?$/i.test(entry.value)) {
+    const amount = parseMoney(entry.value);
+    const yearMatch = `${entry.labelLine} ${entry.value}`.match(/\b(20\d{2})\b/);
+
+    if (amount !== null) {
+      return {
+        value: amount,
+        year: yearMatch ? Number(yearMatch[1]) : null,
+        source: PROVIDER_NAME,
+        isFiled: true
+      };
+    }
+  }
+
   const legacyValue = findMoneyBefore(lines, /^Utile\s+20\d{2}$/i);
   const legacyYear = findYearFromLine(lines, /^Utile\s+20\d{2}$/i);
 
@@ -281,12 +325,6 @@ function inferProfit(lines) {
     };
   }
 
-  const entry = findLabelEntry(lines, [
-    "Utile",
-    "Utile/Perdita",
-    "Risultato d'esercizio",
-    "Risultato di esercizio"
-  ]);
   if (!entry?.value || /^N\.?D\.?$/i.test(entry.value)) return null;
 
   const amount = parseMoney(entry.value);
