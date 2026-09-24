@@ -50,6 +50,7 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
   assert.equal(aziende.status, "Attiva");
   assert.equal(aziende.rea, "MI-1453877");
   assert.equal(aziende.financials.revenue.value, 1_992_222);
+  assert.equal(aziende.financials.personnelCost.value, 151_312);
 
   assert.equal(registro.vat, "11295150152");
   assert.equal(registro.financials.balanceHistory[0].year, 2025);
@@ -61,6 +62,8 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
   assert.equal(company.financials.revenue.year, 2025);
   assert.equal(company.financials.revenue.value, 1_820_000);
   assert.equal(company.financials.profit.value, 266_000);
+  assert.equal(company.financials.personnelCostRatio.year, 2024);
+  assert.ok(Math.abs(company.financials.personnelCostRatio.value - 7.595145320147853) < 0.0001);
   assert.ok(company.provider.includes("CompanyReports.it"));
   assert.ok(company.provider.includes("RegistroAziende.it"));
 
