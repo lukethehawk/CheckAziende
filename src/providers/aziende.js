@@ -1,4 +1,5 @@
-const BASE_URL = "https://www.aziende.it";
+const BASE_URL = "https://www.companyreports.it";
+const PROVIDER_NAME = "CompanyReports.it";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_SLUGS = 56;
 const api = globalThis.browser ?? globalThis.chrome;
@@ -18,26 +19,57 @@ function normalizeLines(text) {
     .filter(Boolean);
 }
 
-function findLabelValue(lines, labels) {
+function findLabelEntry(lines, labels) {
   const normalizedLabels = labels.map((label) => label.toLowerCase());
 
   for (let i = 0; i < lines.length; i += 1) {
-    const lower = lines[i].toLowerCase();
-    const exactIndex = normalizedLabels.findIndex((label) => lower === label);
-
-    if (exactIndex >= 0) {
-      return lines[i + 1] || null;
-    }
+    const line = lines[i];
+    const lower = line.toLowerCase();
 
     for (const label of normalizedLabels) {
+      if (lower === label || lower === `${label}:`) {
+        return {
+          labelLine: line,
+          value: lines[i + 1] || null,
+          index: i
+        };
+      }
+
+      if (lower.startsWith(`${label} (`)) {
+        return {
+          labelLine: line,
+          value: lines[i + 1] || null,
+          index: i
+        };
+      }
+
       if (lower.startsWith(label + " ")) {
-        const value = clean(lines[i].slice(label.length));
-        if (value) return value;
+        const inline = clean(line.slice(label.length)).replace(/^:\s*/, "");
+
+        if (/^\(\s*20\d{2}\s*\)$/.test(inline)) {
+          return {
+            labelLine: line,
+            value: lines[i + 1] || null,
+            index: i
+          };
+        }
+
+        if (inline) {
+          return {
+            labelLine: line,
+            value: inline,
+            index: i
+          };
+        }
       }
     }
   }
 
   return null;
+}
+
+function findLabelValue(lines, labels) {
+  return findLabelEntry(lines, labels)?.value || null;
 }
 
 function parseItalianNumber(value) {
@@ -87,27 +119,45 @@ function findYearFromLine(lines, labelPattern) {
 
 function findEmployees(lines, text) {
   for (let i = 0; i < lines.length; i += 1) {
-    if (!/^dipendenti(?:\s+\d{4})?$/i.test(lines[i])) continue;
+    if (!/^(?:n\.\s*)?dipendenti(?:\s+20\d{2})?$/i.test(lines[i])) continue;
 
-    const previous = lines[i - 1] || "";
-    const exact = previous.match(/^([0-9][0-9.]*)$/);
-    if (exact) {
-      const value = parseItalianNumber(exact[1]);
-      if (Number.isFinite(value)) {
+    for (const candidate of [lines[i + 1], lines[i - 1]]) {
+      const raw = clean(candidate);
+      if (!raw) continue;
+
+      const exact = raw.match(/^([0-9][0-9.]*)$/);
+      if (exact) {
+        const value = parseItalianNumber(exact[1]);
+        if (Number.isFinite(value)) {
+          return {
+            value,
+            display: String(value),
+            year: findYearFromLine([lines[i]], /dipendenti/i)
+          };
+        }
+      }
+
+      const range = raw.match(/^(?:da\s*)?(\d+)\s*(?:-|a)\s*(\d+)$/i);
+      if (range) {
         return {
-          value,
-          display: String(value),
+          value: null,
+          display: `${range[1]}-${range[2]}`,
           year: findYearFromLine([lines[i]], /dipendenti/i)
         };
       }
     }
   }
 
-  const rangeMatch = String(text || "").match(/\b(\d+\s*-\s*\d+)\s+dipendenti\b/i);
+  const rangeMatch = String(text || "").match(
+    /(?:n\.\s*)?dipendenti\s+(?:da\s*)?(\d+)\s*(?:-|a)\s*(\d+)/i
+  ) || String(text || "").match(
+    /(?:da\s*)?(\d+)\s*(?:-|a)\s*(\d+)\s+dipendenti\b/i
+  );
+
   if (rangeMatch) {
     return {
       value: null,
-      display: rangeMatch[1].replace(/\s+/g, ""),
+      display: `${rangeMatch[1]}-${rangeMatch[2]}`,
       year: null
     };
   }
@@ -179,52 +229,88 @@ function inferRea(text) {
 }
 
 function inferAteco(text, lines) {
-  const summary = String(text || "").match(/\bATECO\s+([0-9]{2}(?:\.[0-9]{1,2}){1,3})\b/i);
+  const summary = String(text || "").match(
+    /\b(?:Codice\s+)?ATECO\s*:?\s*([0-9]{2}(?:\.[0-9]{1,2}){1,3}|[0-9]{4,6})\b/i
+  );
   const code = summary?.[1] || sanitizeField(findLabelValue(lines, ["Codice Ateco"]));
-  const description = sanitizeField(findLabelValue(lines, ["Attività"]));
+  const description = sanitizeField(
+    findLabelValue(lines, ["Attività prevalente", "Attivita prevalente", "Attività", "Attivita"])
+  );
 
   if (!code && !description) return null;
   return { code: code || null, description: description || null };
 }
 
 function inferRevenue(lines) {
-  const value = findMoneyBefore(lines, /^Fatturato\s+20\d{2}$/i);
-  const year = findYearFromLine(lines, /^Fatturato\s+20\d{2}$/i);
+  const legacyValue = findMoneyBefore(lines, /^Fatturato\s+20\d{2}$/i);
+  const legacyYear = findYearFromLine(lines, /^Fatturato\s+20\d{2}$/i);
 
-  if (value !== null) {
-    return { value, year, source: "Aziende.it", isFiled: true };
+  if (legacyValue !== null) {
+    return {
+      value: legacyValue,
+      year: legacyYear,
+      source: PROVIDER_NAME,
+      isFiled: true
+    };
   }
 
-  const tableValue = findLabelValue(lines, ["Fatturato"]);
-  if (!tableValue) return null;
+  const entry = findLabelEntry(lines, ["Fatturato"]);
+  if (!entry?.value || /^N\.?D\.?$/i.test(entry.value)) return null;
 
-  const amount = parseMoney(tableValue);
-  const yearMatch = tableValue.match(/\b(20\d{2})\b/);
+  const amount = parseMoney(entry.value);
+  const yearMatch = `${entry.labelLine} ${entry.value}`.match(/\b(20\d{2})\b/);
 
   return amount === null ? null : {
     value: amount,
     year: yearMatch ? Number(yearMatch[1]) : null,
-    source: "Aziende.it",
+    source: PROVIDER_NAME,
     isFiled: true
   };
 }
 
 function inferProfit(lines) {
-  const value = findMoneyBefore(lines, /^Utile\s+20\d{2}$/i);
-  const year = findYearFromLine(lines, /^Utile\s+20\d{2}$/i);
+  const legacyValue = findMoneyBefore(lines, /^Utile\s+20\d{2}$/i);
+  const legacyYear = findYearFromLine(lines, /^Utile\s+20\d{2}$/i);
 
-  if (value !== null) return { value, year };
+  if (legacyValue !== null) {
+    return {
+      value: legacyValue,
+      year: legacyYear,
+      source: PROVIDER_NAME,
+      isFiled: true
+    };
+  }
 
-  const tableValue = findLabelValue(lines, ["Utile", "Utile/Perdita"]);
-  if (!tableValue) return null;
+  const entry = findLabelEntry(lines, [
+    "Utile",
+    "Utile/Perdita",
+    "Risultato d'esercizio",
+    "Risultato di esercizio"
+  ]);
+  if (!entry?.value || /^N\.?D\.?$/i.test(entry.value)) return null;
 
-  const amount = parseMoney(tableValue);
-  const yearMatch = tableValue.match(/\b(20\d{2})\b/);
+  const amount = parseMoney(entry.value);
+  const yearMatch = `${entry.labelLine} ${entry.value}`.match(/\b(20\d{2})\b/);
 
   return amount === null ? null : {
     value: amount,
     year: yearMatch ? Number(yearMatch[1]) : null,
-    source: "Aziende.it",
+    source: PROVIDER_NAME,
+    isFiled: true
+  };
+}
+
+function inferPersonnelCost(lines) {
+  const entry = findLabelEntry(lines, ["Costo del personale"]);
+  if (!entry?.value || /^N\.?D\.?$/i.test(entry.value)) return null;
+
+  const amount = parseMoney(entry.value);
+  const yearMatch = `${entry.labelLine} ${entry.value}`.match(/\b(20\d{2})\b/);
+
+  return amount === null ? null : {
+    value: amount,
+    year: yearMatch ? Number(yearMatch[1]) : null,
+    source: PROVIDER_NAME,
     isFiled: true
   };
 }
@@ -289,7 +375,7 @@ function inferBalanceHistory(lines) {
       profit: moneyValues[1] ?? null,
       employees,
       capital: moneyValues[2] ?? null,
-      source: "Aziende.it",
+      source: PROVIDER_NAME,
       isFiled: true
     });
   }
@@ -301,7 +387,40 @@ function inferAddress(lines, text) {
   const summary = String(text || "").match(/Sede\s+legale:\s*([^\n]+)/i);
   if (summary?.[1]) return sanitizeField(summary[1]);
 
-  return sanitizeField(findLabelValue(lines, ["Sede"]));
+  return sanitizeField(findLabelValue(lines, ["Indirizzo", "Sede"]));
+}
+
+function inferCompanyName(text, lines, fallbackName = null) {
+  const compact = clean(text);
+  const header = compact.match(
+    /Ragione\s+Sociale\s*:\s*(.+?)(?=\s+(?:Codice\s+ATECO\s*:|Anteprima\b|Partita\s+IVA\b|Indirizzo\b|Fatturato\b|$))/i
+  );
+
+  if (header?.[1]) {
+    const value = sanitizeField(header[1]);
+    if (value) return value;
+  }
+
+  const labeled = sanitizeField(findLabelValue(lines, ["Ragione Sociale"]));
+  if (labeled) return labeled;
+
+  return sanitizeField(
+    String(fallbackName || "").replace(/\s+Fatturato\s*$/i, "")
+  );
+}
+
+function inferCompanyRea(lines, text, chamber) {
+  const explicit = inferRea(text);
+  if (explicit) return explicit;
+
+  const raw = sanitizeField(findLabelValue(lines, ["REA"]));
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw) && /^[A-Z]{2}$/i.test(chamber || "")) {
+    return `${String(chamber).toUpperCase()}-${raw}`;
+  }
+
+  return raw;
 }
 
 export function parseBalanceHistoryRows(rows) {
@@ -355,7 +474,7 @@ export function parseBalanceHistoryRows(rows) {
       profit: parseMoney(row[profitIndex]) ?? null,
       employees: Number.isFinite(employeeValue) ? employeeValue : null,
       capital: parseMoney(row[capitalIndex]) ?? null,
-      source: "Aziende.it",
+      source: PROVIDER_NAME,
       isFiled: true
     });
 
@@ -593,20 +712,28 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
   const profit = inferProfit(lines);
   const employees = findEmployees(lines, text);
   const netMargin = inferNetMargin(text, revenue, profit);
+  const chamber = sanitizeField(
+    findLabelValue(lines, ["Camera di Commercio", "CamCom"])
+  );
+  const rea = inferCompanyRea(lines, text, chamber);
 
   const company = {
-    provider: "Aziende.it",
+    provider: PROVIDER_NAME,
     providerUrl: url || null,
-    name: sanitizeField(name) || sanitizeField(findLabelValue(lines, ["Ragione Sociale"])) || null,
+    name: inferCompanyName(text, lines, name),
     vat,
     status: inferCompanyStatus(text, lines),
-    legalForm: sanitizeField(findLabelValue(lines, ["Natura Giuridica", "Forma"])),
+    legalForm: sanitizeField(
+      findLabelValue(lines, ["Forma giuridica", "Natura Giuridica", "Forma"])
+    ),
     taxCode: sanitizeField(findLabelValue(lines, ["Codice Fiscale"])),
-    rea: inferRea(text) || sanitizeField(findLabelValue(lines, ["REA"])),
+    rea,
     pec: sanitizeField(findLabelValue(lines, ["PEC"])),
     sdi: sanitizeField(findLabelValue(lines, ["Codice Destinatario SDI", "SDI"])),
-    registrationDate: sanitizeField(findLabelValue(lines, ["Data Iscrizione", "Iscrizione"])),
-    chamber: sanitizeField(findLabelValue(lines, ["Camera di Commercio"])),
+    registrationDate: sanitizeField(
+      findLabelValue(lines, ["Fondazione", "Data Iscrizione", "Iscrizione"])
+    ),
+    chamber,
     city: sanitizeField(findLabelValue(lines, ["Comune", "Città"])),
     province: sanitizeField(findLabelValue(lines, ["Provincia"])),
     region: sanitizeField(findLabelValue(lines, ["Regione"])),
@@ -615,6 +742,7 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
     financials: {
       revenue,
       profit,
+      personnelCost: inferPersonnelCost(lines),
       employees,
       netMargin,
       revenuePerEmployee: inferRevenuePerEmployee(revenue, employees),
@@ -633,13 +761,20 @@ export function parseAziendeText(text, { name = null, url = null } = {}) {
 export function parseAziendePage(html, url) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const h1 = clean(doc.querySelector("h1")?.textContent || "");
+  const companyHeading = [...doc.querySelectorAll("h2")]
+    .map((node) => clean(node.textContent || ""))
+    .find((value) =>
+      value &&
+      !/^(?:anteprima|visura|bilancio|document)/i.test(value)
+    );
   const text = doc.body?.innerText || doc.body?.textContent || "";
-  const company = parseAziendeText(text, { name: h1 || null, url });
+  const company = parseAziendeText(text, {
+    name: companyHeading || h1 || null,
+    url
+  });
 
   if (!company) return null;
 
-  // DOMParser may flatten visual line breaks, so derive these fields from
-  // structural HTML when possible instead of relying only on text lines.
   company.status = inferCompanyStatus(text, normalizeLines(text));
 
   const domHistory = extractBalanceHistoryFromDocument(doc);
@@ -739,6 +874,60 @@ async function fetchCompanySlug(slug, { retryTransient = true } = {}) {
   }
 }
 
+async function fetchCompanyVat(vat, { retryTransient = true } = {}) {
+  const targetVat = String(vat || "").replace(/\D/g, "");
+  if (!/^\d{11}$/.test(targetVat)) return null;
+
+  const key = `companyreports:v1:vat:${targetVat}`;
+  const cached = await readCache(key);
+  if (cached !== undefined) return cached;
+
+  const url = `${BASE_URL}/${encodeURIComponent(targetVat)}`;
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      credentials: "omit",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml"
+      }
+    });
+
+    if (!response.ok) {
+      if (shouldCacheAziendeMiss(response.status)) {
+        await writeCache(key, null);
+        return null;
+      }
+
+      if (
+        retryTransient &&
+        (response.status === 429 || response.status >= 500)
+      ) {
+        await wait(450);
+        return fetchCompanyVat(targetVat, { retryTransient: false });
+      }
+
+      return null;
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) return null;
+
+    const html = await response.text();
+    const company = parseAziendePage(html, response.url || url);
+
+    if (!company?.vat || company.vat !== targetVat) {
+      return null;
+    }
+
+    await writeCache(key, company);
+    return company;
+  } catch {
+    return null;
+  }
+}
+
 async function firstVatMatch(slugs, vat) {
   const uniqueSlugs = unique(slugs).slice(0, MAX_SLUGS);
 
@@ -781,22 +970,24 @@ export async function findAziendeCompanyByVat(
   const targetVat = String(vat || "").replace(/\D/g, "");
   if (!/^\d{11}$/.test(targetVat)) return null;
 
-  return firstVatMatch(
-    buildSlugCandidates(names, { provinceHints }),
-    targetVat
-  );
+  return fetchCompanyVat(targetVat);
 }
 
 export async function findAziendeCompaniesByContext({
   names = [],
   provinceHints = []
 } = {}) {
-  if (!names?.length) return [];
-
-  return fetchCandidates(
-    buildSlugCandidates(names, {
-      provinceHints,
-      includeItalianBrandVariants: true
-    })
+  const vats = unique(
+    names.flatMap((value) =>
+      [...String(value || "").matchAll(/\b\d{11}\b/g)].map((match) => match[0])
+    )
   );
+
+  if (!vats.length) return [];
+
+  const values = await Promise.all(
+    vats.slice(0, 4).map((vat) => fetchCompanyVat(vat))
+  );
+
+  return values.filter(Boolean);
 }
