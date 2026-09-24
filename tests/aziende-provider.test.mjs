@@ -362,3 +362,95 @@ test("keeps exact canonical Aziende slug first for normal legal names", () => {
 
   assert.equal(slugs[0], "future-tech-srl");
 });
+
+
+test("parses CompanyReports public company details by VAT", () => {
+  const text = `
+Partita IVA: 11511830967 - Codice Fiscale: 11511830967 - Ragione Sociale: ITALIA MANAGEMENT S.R.L.
+Italia Management S.r.l.
+Partita IVA
+11511830967
+Indirizzo
+Viale Abruzzi, 94 - Milano (MI)
+Fatturato
+€ 102.556 (2024) ACQUISTA BILANCIO
+Utile
+€ 2.530 (2024)
+Costo del personale
+€ 95 (2024)
+N. Dipendenti
+1
+Stato Attività
+Attiva
+Codice Fiscale
+11511830967
+Forma giuridica
+Societa' a responsabilita' limitata
+Codice Ateco
+70.22.09
+Attività prevalente
+Altre attivita' di consulenza imprenditoriale
+Fondazione
+24/12/2020
+CamCom
+MI
+REA
+2608329
+`;
+
+  const company = parseAziendeText(text, {
+    name: "Italia Management S.r.l. Fatturato",
+    url: "https://www.companyreports.it/11511830967"
+  });
+
+  assert.equal(company.provider, "CompanyReports.it");
+  assert.equal(company.name, "ITALIA MANAGEMENT S.R.L.");
+  assert.equal(company.vat, "11511830967");
+  assert.equal(company.taxCode, "11511830967");
+  assert.equal(company.address, "Viale Abruzzi, 94 - Milano (MI)");
+  assert.equal(company.financials.revenue.value, 102556);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 2530);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 95);
+  assert.equal(company.financials.personnelCost.year, 2024);
+  assert.equal(company.financials.employees.value, 1);
+  assert.equal(company.status, "Attiva");
+  assert.equal(company.legalForm, "Societa' a responsabilita' limitata");
+  assert.equal(company.ateco.code, "70.22.09");
+  assert.equal(company.registrationDate, "24/12/2020");
+  assert.equal(company.chamber, "MI");
+  assert.equal(company.rea, "MI-2608329");
+});
+
+test("parses CompanyReports alternate year labels and employee ranges", () => {
+  const text = `
+MEA S.R.L.
+Partita IVA
+01234567890
+Fatturato (2024)
+€ 4.456.517
+Risultato d'esercizio (2024)
+€ 57.122
+Costo del personale (2024)
+€ 3.485.797
+N. Dipendenti
+da 3 a 5
+Stato Attività
+Attiva
+`;
+
+  const company = parseAziendeText(text, {
+    name: "MEA S.R.L. Fatturato"
+  });
+
+  assert.equal(company.provider, "CompanyReports.it");
+  assert.equal(company.name, "MEA S.R.L.");
+  assert.equal(company.financials.revenue.value, 4456517);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 57122);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 3485797);
+  assert.equal(company.financials.employees.value, null);
+  assert.equal(company.financials.employees.display, "3-5");
+});
