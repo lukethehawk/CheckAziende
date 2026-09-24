@@ -179,3 +179,22 @@ test("manual RegistroAziende search rows skip entries without a valid VAT", () =
     ["11295150152"]
   );
 });
+
+
+test("manual search rows accept card-style extracted results", () => {
+  const companies = parseRegistroAziendeSearchRows([
+    {
+      name: "Future Tech Srl",
+      href: "/azienda/future-tech-srl-basiglio",
+      location: "BASIGLIO, Milano",
+      vat: "11295150152",
+      cells: ["Future Tech Srl", "BASIGLIO, Milano", "11295150152"]
+    }
+  ]);
+
+  assert.equal(companies.length, 1);
+  assert.equal(companies[0].name, "Future Tech Srl");
+  assert.equal(companies[0].vat, "11295150152");
+  assert.equal(companies[0].city, "BASIGLIO");
+  assert.equal(companies[0].province, "Milano");
+});
