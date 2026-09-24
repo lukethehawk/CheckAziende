@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.2`.
+Versione `0.9.3`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -389,3 +389,16 @@ La 0.9.2:
 - scarta le aziende senza sufficiente sovrapposizione con la query;
 - limita a 5 solo dopo il ranking;
 - invalida nuovamente la cache della ricerca manuale.
+
+
+## Manual search accuracy 0.9.3
+
+La ricerca manuale per ragione sociale viene resa più rigorosa e i risultati vengono verificati sulla pagina pubblica della singola azienda prima di essere mostrati.
+
+- i risultati di ricerca possono essere scoperti anche quando la lista non espone direttamente la P.IVA;
+- ogni candidato rilevante viene aperto sulla relativa pagina `/azienda/...` e la P.IVA viene ricavata dalla scheda aziendale, evitando associazioni con aziende vicine o suggerite nella stessa pagina;
+- per query con più parole devono corrispondere tutti i termini significativi: ad esempio `Scstechnology Srl` non è più considerata una corrispondenza per `future tech srl`;
+- la lunghezza minima della ricerca scende da 4 a 3 caratteri, quindi nomi brevi come `EPY` sono supportati;
+- la cache della ricerca manuale viene invalidata (`v4`).
+
+Corretto inoltre il cambio azienda durante una ricerca manuale: se la nuova società non dispone di fatturato, il popup non conserva più il valore visualizzato per la società precedente. Il blocco fatturato viene nascosto e azzerato quando il dato non è disponibile. Durante una ricerca manuale vengono anche nascosti i contatti letti dal sito aperto, perché potrebbero appartenere a un'azienda diversa da quella cercata.
