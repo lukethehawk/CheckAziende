@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.2`.
+Versione `0.8.3`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -107,19 +107,19 @@ tests/
   domain-confidence.test.mjs
 ```
 
-## Provider societario
+## Provider societari
 
-La versione 0.4.0 aggiunge un primo provider per Aziende.it.
+L'architettura corrente usa tre fonti con ruoli separati:
 
-Il provider:
-- cerca una scheda tramite ragione sociale/brand e varianti delle forme giuridiche;
-- quando la P.IVA è già nota, accetta la scheda solo se la P.IVA coincide;
-- quando la P.IVA non è presente sul sito, passa la società candidata al confidence engine;
-- normalizza fatturato, utile/perdita, dipendenti, margine netto, fatturato per dipendente, ATECO, forma giuridica, REA, PEC, SDI e data di iscrizione;
-- usa una cache locale di 12 ore;
-- è isolato in `src/providers/aziende.js`, quindi può essere sostituito o affiancato da altre fonti.
+- **CompanyReports.it** è il provider canonico per anagrafica e dati economici pubblici quando la P.IVA è nota;
+- **RegistroAziende.it** è il fallback/verificatore e può completare campi mancanti e storico dei bilanci;
+- **Xray Finance** è un provider di arricchimento finanziario, in particolare per EBITDA ed EBITDA margin.
 
-L'accesso cross-origin è limitato a `www.aziende.it` e VIES.
+Il provider CompanyReports usa direttamente la P.IVA nella URL pubblica e accetta la scheda solo se la P.IVA estratta coincide con quella richiesta. Normalizza i campi pubblici disponibili mantenendo invariata l'interfaccia usata dall'orchestratore.
+
+Per compatibilità interna il modulo primario conserva ancora il nome storico `src/providers/aziende.js`; il nome del file non indica più la fonte utilizzata.
+
+L'accesso cross-origin è limitato a VIES e ai tre provider configurati nel `manifest.json`.
 
 ## Prossimi passi
 
@@ -142,7 +142,7 @@ Quando la P.IVA è già stata identificata:
 - CheckAziende cerca la società su Xray Finance;
 - accetta la scheda soltanto se la P.IVA coincide;
 - importa EBITDA ed EBITDA margin;
-- mantiene Aziende.it come fonte primaria per anagrafica, fatturato, utile e storico bilanci;
+- mantiene il provider canonico come fonte primaria per anagrafica, fatturato e utile; RegistroAziende completa lo storico dei bilanci quando disponibile;
 - se Xray Finance non trova una corrispondenza valida, la scheda continua a funzionare senza EBITDA.
 
 È presente anche un motore interno di valutazione finanziaria che considera stato, anzianità, numero di bilanci disponibili, EBITDA margin, margine netto, trend del fatturato e continuità degli utili. Il punteggio non viene ancora mostrato nell'interfaccia: servirà per una futura scala rosso-verde e per il requisito operativo di almeno due bilanci depositati.
@@ -155,7 +155,7 @@ L'utile è mostrato in verde quando positivo e in rosso con segno meno quando ne
 La versione 0.6.0 introduce un orchestratore dei provider con priorità alla velocità:
 
 - VIES continua a verificare la P.IVA;
-- Aziende.it e Xray Finance vengono interrogati in parallelo con un budget breve;
+- CompanyReports.it e Xray Finance vengono interrogati in parallelo con un budget breve;
 - RegistroAziende.it viene usato come fallback bloccante solo se il provider primario è incompleto;
 - quando i dati principali sono già disponibili, RegistroAziende.it viene usato in background come verifica incrociata e non ritarda il primo render;
 - i risultati completi vengono memorizzati localmente per 24 ore e possono essere riutilizzati fino a 7 giorni con aggiornamento in background (stale-while-revalidate);
@@ -163,7 +163,7 @@ La versione 0.6.0 introduce un orchestratore dei provider con priorità alla vel
 
 RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
 
-ReportAziende è predisposto come possibile provider futuro, ma la sua API ufficiale richiede un token Bearer. CompanyReports e UfficioCamerale non vengono interrogati automaticamente finché richiedono login/acquisti o non offrono un accesso pubblico stabile: aggiungerli al fast path aumenterebbe latenza e fragilità senza un beneficio proporzionato.
+ReportAziende resta una possibile fonte futura tramite API autenticata. CompanyReports.it è invece ora integrato nel fast path tramite la scheda pubblica per P.IVA.
 
 
 ## Hardening 0.7.0
@@ -185,7 +185,7 @@ Queste regole preparano il futuro score rosso-verde evitando di confondere dati 
 
 ## Refactor 0.7.1
 
-La normalizzazione della società e l'arricchimento fra Aziende.it, RegistroAziende e Xray sono stati spostati in `src/company.js`. Il popup resta responsabile del flusso e del rendering, mentre il modello dati è ora isolato e testabile separatamente. Questo riduce il rischio di regressioni quando verranno aggiunti nuovi provider o lo score finanziario visibile.
+La normalizzazione della società e l'arricchimento fra provider canonico, RegistroAziende e Xray sono gestiti in `src/company.js`. Il popup resta responsabile del flusso e del rendering, mentre il modello dati è ora isolato e testabile separatamente. Questo riduce il rischio di regressioni quando verranno aggiunti nuovi provider o lo score finanziario visibile.
 
 
 ## UI 0.7.3
@@ -251,11 +251,11 @@ Ordine di evidenza previsto:
 1. P.IVA esplicita in footer/area legale della pagina corrente;
 2. P.IVA trovata in Privacy / Note legali / Contatti;
 3. ragione sociale del titolare ricavata da Privacy/Legal;
-4. risoluzione della ragione sociale tramite Aziende.it e RegistroAziende;
+4. risoluzione della ragione sociale tramite i provider societari disponibili, con CompanyReports quando la P.IVA è nota e RegistroAziende come fallback;
 5. dominio, logo, `og:site_name`, copyright e brand come segnali di coerenza;
 6. Xray Finance usato come verifica/arricchimento finanziario, non come fonte primaria per stabilire il proprietario del dominio.
 
-Il resolver non dovrebbe dipendere da un singolo provider: Aziende.it e RegistroAziende sarebbero le fonti principali per risolvere nome → società/P.IVA, mentre Xray resterebbe soprattutto un provider finanziario.
+Il resolver non dovrebbe dipendere da un singolo provider: RegistroAziende può restare utile per il discovery nome → società/P.IVA, CompanyReports per il dettaglio una volta nota la P.IVA, mentre Xray resta soprattutto un provider finanziario.
 
 La scelta attuale è di non implementarlo ancora: i casi esistenti vengono gestiti con il flusso corrente e il resolver resta una possibile evoluzione architetturale generale, da introdurre solo se i casi directory/portali diventano abbastanza frequenti da giustificarlo.
 
@@ -308,3 +308,16 @@ Regole:
 - la cache generale dell'orchestratore è stata invalidata a `v8` per non riutilizzare snapshot precedenti incompleti.
 
 Sono presenti test di regressione sulla sequenza Registro → Aziende → Xray e sul mantenimento di Aziende come primary.
+
+
+## Consolidamento 0.8.3
+
+La versione 0.8.3 consolida il passaggio del provider canonico da Aziende.it a CompanyReports.it senza modificare le logiche di identificazione, confidence, merge o rendering.
+
+- documentata l'architettura corrente dei provider;
+- allineati versione di manifest e package;
+- aggiunte fixture CompanyReports ricostruite per i casi Future Tech e Rubino;
+- i test di regressione usano ora fixture coerenti con il provider canonico corrente;
+- le fixture legacy Aziende.it non fanno più parte della suite attiva.
+
+Il flusso resta: **CompanyReports.it → canonico**, **RegistroAziende.it → fallback/verifica**, **Xray Finance → arricchimento**.
