@@ -1,9 +1,6 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
 import { findAziendeCompaniesByContext } from "../providers/aziende.js";
-import {
-  findRegistroAziendeCompaniesByContext,
-  findRegistroAziendeCompaniesByName
-} from "../providers/registroaziende.js";
+import { findRegistroAziendeCompaniesByContext } from "../providers/registroaziende.js";
 import {
   mergeProviderResultState,
   previousBalanceRows,
@@ -72,8 +69,6 @@ const elements = {
   showManual: document.querySelector("#show-manual"),
   manualPanel: document.querySelector("#manual-panel"),
   manualDescription: document.querySelector("#manual-description"),
-  manualSearchStatus: document.querySelector("#manual-search-status"),
-  manualSearchResults: document.querySelector("#manual-search-results"),
   cancelManual: document.querySelector("#cancel-manual"),
   input: document.querySelector("#vat-input"),
   button: document.querySelector("#check-button"),
@@ -254,30 +249,15 @@ function trackDataCompletion(promise, generation) {
   Promise.resolve(promise).then(finish, finish);
 }
 
-function clearManualSearchResults() {
-  elements.manualSearchStatus.textContent = "";
-  elements.manualSearchStatus.classList.add("hidden");
-  elements.manualSearchStatus.classList.remove("error");
-  elements.manualSearchResults.textContent = "";
-  elements.manualSearchResults.classList.add("hidden");
-}
-
-function setManualSearchStatus(message, { error = false } = {}) {
-  elements.manualSearchStatus.textContent = message || "";
-  elements.manualSearchStatus.classList.toggle("hidden", !message);
-  elements.manualSearchStatus.classList.toggle("error", Boolean(error));
-}
-
 function showManual({ allowCancel = companyIsVisible, message } = {}) {
   elements.manualDescription.textContent =
-    message || "Inserisci la Partita IVA oppure la ragione sociale dell'azienda.";
+    message || "Inserisci la Partita IVA dell'azienda.";
   elements.cancelManual.classList.toggle("hidden", !allowCancel);
   elements.manualPanel.classList.remove("hidden");
   setTimeout(() => elements.input.focus(), 0);
 }
 
 function hideManual() {
-  clearManualSearchResults();
   elements.manualPanel.classList.add("hidden");
 }
 
@@ -994,115 +974,6 @@ async function lookupVat(
   return true;
 }
 
-function renderManualSearchResults(companies) {
-  elements.manualSearchResults.textContent = "";
-
-  for (const company of companies.slice(0, 5)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "manual-search-result";
-
-    const name = document.createElement("strong");
-    name.textContent = company.name || `P.IVA ${company.vat}`;
-
-    const meta = document.createElement("span");
-    const location = [company.city, company.province]
-      .filter(Boolean)
-      .join(", ");
-    meta.textContent = [
-      location || "Località non disponibile",
-      company.vat ? `P.IVA ${company.vat}` : null
-    ]
-      .filter(Boolean)
-      .join(" · ");
-
-    button.append(name, meta);
-    button.addEventListener("click", async () => {
-      elements.input.value = company.vat || "";
-      clearManualSearchResults();
-
-      await lookupVat(company.vat, {
-        source: "manual",
-        bypassCache: true,
-        evidenceLabel: "Selezionata da ricerca per ragione sociale",
-        nameHints: [company.name],
-        cityHints: [company.city],
-        provinceHints: [company.province]
-      });
-    });
-
-    elements.manualSearchResults.append(button);
-  }
-
-  elements.manualSearchResults.classList.toggle(
-    "hidden",
-    !elements.manualSearchResults.childElementCount
-  );
-}
-
-async function runManualSearch() {
-  const query = String(elements.input.value || "").trim();
-  clearManualSearchResults();
-
-  if (!query) {
-    setManualSearchStatus(
-      "Inserisci una Partita IVA oppure una ragione sociale.",
-      { error: true }
-    );
-    return;
-  }
-
-  const vatLike = query
-    .replace(/^IT/i, "")
-    .replace(/[\s.:-]/g, "");
-
-  if (/^\d+$/.test(vatLike)) {
-    await lookupVat(query, {
-      source: "manual",
-      bypassCache: true
-    });
-    return;
-  }
-
-  if (query.length < 3) {
-    setManualSearchStatus(
-      "Inserisci almeno 3 caratteri per cercare una ragione sociale.",
-      { error: true }
-    );
-    return;
-  }
-
-  elements.button.disabled = true;
-  setManualSearchStatus("Ricerca aziende…");
-
-  try {
-    const companies = await findRegistroAziendeCompaniesByName(query);
-
-    if (!companies.length) {
-      setManualSearchStatus(
-        "Nessuna azienda trovata. Prova una ragione sociale più precisa.",
-        { error: true }
-      );
-      return;
-    }
-
-    setManualSearchStatus(
-      companies.length === 1
-        ? "1 azienda trovata"
-        : `${companies.length} aziende trovate`
-    );
-    renderManualSearchResults(companies);
-  } catch {
-    setManualSearchStatus(
-      "La ricerca per ragione sociale non è disponibile in questo momento.",
-      { error: true }
-    );
-  } finally {
-    elements.button.disabled = false;
-  }
-}
-
-
 async function scanFallbackPages(tabId) {
   const relatedUrls = currentScan?.relatedUrls || [];
   if (!relatedUrls.length) return null;
@@ -1335,7 +1206,7 @@ async function inspectActivePage() {
     if (domainMatchFound) return;
 
     showUnidentified(
-      "Nessuna società identificata automaticamente. Inserisci una P.IVA o una ragione sociale per cercarla manualmente."
+      "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
     );
   } catch {
     showUnidentified(
@@ -1357,20 +1228,31 @@ async function copyValue(value, button) {
   }, 1100);
 }
 
-elements.button.addEventListener("click", runManualSearch);
+elements.button.addEventListener("click", () =>
+  lookupVat(elements.input.value, {
+    source: "manual",
+    bypassCache: true
+  })
+);
 
 elements.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
-    event.preventDefault();
-    runManualSearch();
+    lookupVat(elements.input.value, {
+      source: "manual",
+      bypassCache: true
+    });
   }
 });
 
-elements.input.addEventListener("input", clearManualSearchResults);
+elements.input.addEventListener("input", () => {
+  const normalized = elements.input.value.replace(/[^0-9ITit\s]/g, "");
+  if (normalized !== elements.input.value) {
+    elements.input.value = normalized;
+  }
+});
 
 elements.showManual.addEventListener("click", () => {
-  elements.input.value = "";
-  clearManualSearchResults();
+  elements.input.value = elements.vat.textContent.replace(/\D/g, "");
   showManual({ allowCancel: true });
 });
 

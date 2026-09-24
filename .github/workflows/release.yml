@@ -1,0 +1,56 @@
+name: Release package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify stable build
+        run: |
+          npm run syntax
+          npm test
+
+      - name: Read extension version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build extension zip
+        shell: bash
+        run: |
+          mkdir -p dist
+          zip -r "dist/CheckAziende-${{ steps.version.outputs.version }}.zip" \
+            manifest.json \
+            src \
+            LICENSE \
+            README.md
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CheckAziende-${{ steps.version.outputs.version }}
+          path: dist/CheckAziende-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CheckAziende-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true

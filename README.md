@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.9.5`.
+Versione `1.0.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -421,3 +421,20 @@ La 0.9.5 consolida le correzioni della ricerca manuale per ragione sociale:
 - le verifiche dei candidati su RegistroAziende vengono effettuate in batch più piccoli;
 - errori HTTP transitori non vengono memorizzati come miss di lunga durata;
 - cache delle ricerche e delle schede RegistroAziende invalidate.
+
+
+## Release stabile 1.0.0
+
+La release stabile 1.0.0 mantiene la ricerca manuale esclusivamente per **Partita IVA**. La ricerca per ragione sociale sviluppata nelle versioni 0.9.x è stata spostata sul branch `beta/manual-company-search` perché il comportamento della ricerca pubblica per nome non è ancora sufficientemente stabile per la release principale.
+
+La versione stabile include invece tutte le correzioni consolidate su:
+- identificazione automatica dal sito e dalle pagine legali;
+- CompanyReports.it come provider canonico;
+- RegistroAziende.it come verifica/fallback;
+- Xray Finance come arricchimento;
+- storico bilanci, EBITDA e profilo finanziario;
+- costo del personale e relativa incidenza;
+- completamento degli indirizzi parziali;
+- reset corretto dei dati finanziari quando si cambia azienda manualmente.
+
+Lo sviluppo della ricerca per ragione sociale continua separatamente nel branch beta e potrà rientrare nella release stabile solo dopo test sufficienti sui casi reali.
