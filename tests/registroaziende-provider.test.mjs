@@ -287,9 +287,41 @@ test("short manual company names are expanded with legal-form variants", () => {
   );
 });
 
-test("normal-length manual searches are not expanded unnecessarily", () => {
+test("bare manual searches are expanded with common legal forms", () => {
   assert.deepEqual(
     buildRegistroManualSearchQueries("future tech"),
-    ["future tech"]
+    [
+      "future tech",
+      "future tech srl",
+      "future tech srls",
+      "future tech spa",
+      "future tech snc",
+      "future tech sas"
+    ]
+  );
+});
+
+test("manual searches with an explicit legal form are not expanded", () => {
+  assert.deepEqual(
+    buildRegistroManualSearchQueries("future tech srl"),
+    ["future tech srl"]
+  );
+});
+
+test("short query EPY does not match a one-letter conjunction token", () => {
+  const ranked = rankRegistroAziendeCompaniesByQuery([
+    {
+      name: "Autotrasporti Cargnino E Brescacin Srl",
+      vat: "12579810016"
+    },
+    {
+      name: "Epy Srl",
+      vat: "05973540155"
+    }
+  ], "epy");
+
+  assert.deepEqual(
+    ranked.map((company) => company.vat),
+    ["05973540155"]
   );
 });
