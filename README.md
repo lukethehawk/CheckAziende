@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `0.8.5`.
+Versione `0.9.0`.
 
 Il flusso di identificazione è volutamente conservativo:
 
@@ -124,7 +124,6 @@ L'accesso cross-origin è limitato a VIES e ai tre provider configurati nel `man
 ## Prossimi passi
 
 - feedback **È questa / Non è questa** con backend e protezione da abuso;
-- ricerca manuale anche per ragione sociale;
 - Public Suffix List completa per i domini internazionali;
 - fixture HTML reali per i provider;
 - separazione ulteriore tra controller e renderer del popup;
@@ -346,3 +345,18 @@ Sulle pagine riconosciute come directory/ricerca:
 - quando la coda contiene più P.IVA, viene privilegiata l'ultima occorrenza con forte contesto legale, tipicamente quella del footer.
 
 È presente un test di regressione sul caso `aziende.it`, dove il proprietario del sito è Ad Intend Srl (P.IVA 02357550066) ma la pagina contiene anche dati di società terze.
+
+
+## Ricerca manuale per ragione sociale 0.9.0
+
+La ricerca manuale accetta ora sia **Partita IVA** sia **ragione sociale**.
+
+- se il valore inserito è numerico, continua a essere usato il normale flusso di lookup per P.IVA;
+- se viene inserito un nome di almeno 4 caratteri, CheckAziende usa la ricerca pubblica di RegistroAziende.it e mostra fino a 5 corrispondenze;
+- ogni risultato mostra ragione sociale, località e P.IVA;
+- selezionando un risultato, la P.IVA viene passata al normale orchestratore: CompanyReports.it resta il provider canonico, RegistroAziende.it il fallback/verificatore e Xray Finance l'arricchimento;
+- il nome e la località selezionati vengono riutilizzati come hint per rendere più affidabile il lookup dei provider;
+- i risultati della ricerca per nome vengono memorizzati localmente per 30 minuti;
+- non vengono effettuate richieste mentre l'utente digita: la ricerca parte soltanto con il pulsante **Cerca** o con Invio.
+
+La ricerca pubblica di RegistroAziende richiede almeno 4 caratteri; l'interfaccia applica lo stesso limite.

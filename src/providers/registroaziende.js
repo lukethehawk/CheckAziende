@@ -1,7 +1,9 @@
 import { slugifyCompanyName } from "./aziende.js";
 
 const BASE_URL = "https://registroaziende.it/azienda";
+const SEARCH_URL = "https://registroaziende.it/ricerca";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const MAX_CANDIDATES = 24;
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -404,11 +406,11 @@ export function parseRegistroAziendePage(html, url) {
   return company;
 }
 
-async function readCache(key) {
+async function readCache(key, ttlMs = CACHE_TTL_MS) {
   try {
     const stored = await api.storage.local.get(key);
     const entry = stored?.[key];
-    if (!entry || Date.now() - entry.cachedAt > CACHE_TTL_MS) return undefined;
+    if (!entry || Date.now() - entry.cachedAt > ttlMs) return undefined;
     return entry.value;
   } catch {
     return undefined;
@@ -473,6 +475,113 @@ async function fetchCandidates(slugs) {
 
   return companies;
 }
+
+export function parseRegistroAziendeSearchRows(
+  rows,
+  { baseUrl = SEARCH_URL } = {}
+) {
+  const companies = [];
+  const byVat = new Set();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const cells = (row?.cells || []).map(clean).filter(Boolean);
+    const joined = cells.join(" ");
+    const vat =
+      clean(row?.vat) ||
+      joined.match(/\b(\d{11})\b/)?.[1] ||
+      null;
+
+    if (!/^\d{11}$/.test(vat || "") || byVat.has(vat)) continue;
+
+    const name = clean(row?.name || cells[0]);
+    if (!name) continue;
+
+    const location = clean(row?.location || cells[1]);
+    const locationParts = location
+      .split(",")
+      .map(clean)
+      .filter(Boolean);
+
+    let providerUrl = null;
+    const href = clean(row?.href);
+    if (href) {
+      try {
+        providerUrl = new URL(href, baseUrl).href;
+      } catch {
+        providerUrl = null;
+      }
+    }
+
+    byVat.add(vat);
+    companies.push({
+      provider: "RegistroAziende.it",
+      providerUrl,
+      name,
+      vat,
+      city: locationParts[0] || null,
+      province: locationParts[1] || null,
+      address: null,
+      financials: {}
+    });
+  }
+
+  return companies.slice(0, 5);
+}
+
+export function parseRegistroAziendeSearchPage(html, url = SEARCH_URL) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  const rows = [...doc.querySelectorAll("tr")].map((row) => {
+    const cells = [...row.querySelectorAll("td")].map((cell) =>
+      clean(cell.textContent)
+    );
+    const anchor = row.querySelector('a[href*="/azienda/"]');
+
+    return {
+      cells,
+      name: clean(anchor?.textContent || cells[0]),
+      href: anchor?.getAttribute("href") || "",
+      location: cells[1] || "",
+      vat: cells.find((value) => /^\d{11}$/.test(value)) || ""
+    };
+  });
+
+  return parseRegistroAziendeSearchRows(rows, { baseUrl: url });
+}
+
+export async function findRegistroAziendeCompaniesByName(query) {
+  const normalizedQuery = clean(query);
+  if (normalizedQuery.length < 4) return [];
+
+  const cacheKey =
+    `registro:manual-search:v1:${normalizedQuery.toLowerCase()}`;
+  const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
+  if (cached !== undefined) return cached;
+
+  const url = `${SEARCH_URL}?q=${encodeURIComponent(normalizedQuery)}`;
+
+  try {
+    const response = await fetch(url, {
+      credentials: "omit",
+      redirect: "follow",
+      headers: { Accept: "text/html,application/xhtml+xml" }
+    });
+
+    if (!response.ok) return [];
+
+    const html = await response.text();
+    const companies = parseRegistroAziendeSearchPage(
+      html,
+      response.url || url
+    );
+
+    await writeCache(cacheKey, companies);
+    return companies;
+  } catch {
+    return [];
+  }
+}
+
 
 export async function findRegistroAziendeCompaniesByContext({
   names = [],

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildRegistroSlugCandidates,
+  parseRegistroAziendeSearchRows,
   parseRegistroAziendeText
 } from "../src/providers/registroaziende.js";
 
@@ -109,4 +110,72 @@ test("builds Xray Finance owner slug from privacy name and city", () => {
 
   assert.ok(slugs.includes("xray-finance-srl-bolzano"));
   assert.ok(slugs.indexOf("xray-finance-srl-bolzano") < 3);
+});
+
+
+test("parses manual RegistroAziende search rows and limits results", () => {
+  const rows = [
+    {
+      name: "Future Tech Srl",
+      href: "/azienda/future-tech-srl-basiglio",
+      cells: ["Future Tech Srl", "BASIGLIO, Milano", "11295150152", "€ 1.99 M"]
+    },
+    {
+      name: "Future Tech Di Hoxhaj Gezim",
+      href: "/azienda/future-tech-di-hoxhaj-gezim-brescia",
+      cells: ["Future Tech Di Hoxhaj Gezim", "BRESCIA, Brescia", "03983230982", "-"]
+    },
+    {
+      name: "Future Tech Srls",
+      href: "/azienda/future-tech-srl-semplificata-caltagirone",
+      cells: ["Future Tech Srls", "CALTAGIRONE, Catania", "05716410872", "-"]
+    },
+    {
+      name: "Future Tech & Wisdom Srl",
+      href: "/azienda/future-tech-wisdom-srl-messina",
+      cells: ["Future Tech & Wisdom Srl", "MESSINA, Messina", "03833730835", "€ 8.71 K"]
+    },
+    {
+      name: "Future Tech Roma Srls",
+      href: "/azienda/future-tech-roma",
+      cells: ["Future Tech Roma Srls", "ROMA, Roma", "17975871009", "-"]
+    },
+    {
+      name: "Extra result",
+      href: "/azienda/extra-result",
+      cells: ["Extra result", "TORINO, Torino", "01234567890", "-"]
+    }
+  ];
+
+  const companies = parseRegistroAziendeSearchRows(rows);
+
+  assert.equal(companies.length, 5);
+  assert.equal(companies[0].name, "Future Tech Srl");
+  assert.equal(companies[0].vat, "11295150152");
+  assert.equal(companies[0].city, "BASIGLIO");
+  assert.equal(companies[0].province, "Milano");
+  assert.equal(
+    companies[0].providerUrl,
+    "https://registroaziende.it/azienda/future-tech-srl-basiglio"
+  );
+});
+
+test("manual RegistroAziende search rows skip entries without a valid VAT", () => {
+  const companies = parseRegistroAziendeSearchRows([
+    {
+      name: "Without VAT",
+      href: "/azienda/without-vat",
+      cells: ["Without VAT", "MILANO, Milano", "None", "-"]
+    },
+    {
+      name: "Valid Company Srl",
+      href: "/azienda/valid-company-srl-milano",
+      cells: ["Valid Company Srl", "MILANO, Milano", "11295150152", "€ 1 M"]
+    }
+  ]);
+
+  assert.deepEqual(
+    companies.map((company) => company.vat),
+    ["11295150152"]
+  );
 });

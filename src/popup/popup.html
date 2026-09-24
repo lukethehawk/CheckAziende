@@ -27,7 +27,7 @@
     <section id="unidentified-view" class="unidentified-view hidden">
       <span class="identity-badge unidentified">Non identificata</span>
       <p class="unidentified-copy">
-        Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente.
+        Nessuna società identificata automaticamente. Inserisci una P.IVA o una ragione sociale per cercarla manualmente.
       </p>
     </section>
 
@@ -141,7 +141,7 @@
         <span id="confidence-separator" class="hidden" aria-hidden="true">•</span>
         <span id="confidence-status" class="confidence-status hidden"></span>
         <span aria-hidden="true">•</span>
-        <button id="show-manual" class="text-button" type="button">Cambia P.IVA</button>
+        <button id="show-manual" class="text-button" type="button">Cerca altra azienda</button>
       </div>
 
       <details id="financial-profile-section" class="financial-profile-section hidden">
@@ -180,20 +180,21 @@
     <section id="manual-panel" class="manual-panel hidden">
       <p class="manual-title">Cerca manualmente</p>
       <p id="manual-description" class="manual-description">
-        Inserisci la Partita IVA dell'azienda.
+        Inserisci la Partita IVA oppure la ragione sociale dell'azienda.
       </p>
       <div class="manual-row">
         <input
           id="vat-input"
           type="text"
-          inputmode="numeric"
           autocomplete="off"
-          maxlength="14"
-          placeholder="Partita IVA"
-          aria-label="Partita IVA"
+          maxlength="100"
+          placeholder="P.IVA o ragione sociale"
+          aria-label="Partita IVA o ragione sociale"
         >
         <button id="check-button" class="primary-button" type="button">Cerca</button>
       </div>
+      <p id="manual-search-status" class="manual-search-status hidden" role="status"></p>
+      <div id="manual-search-results" class="manual-search-results hidden"></div>
       <button id="cancel-manual" class="cancel-button hidden" type="button">Annulla</button>
     </section>
 
