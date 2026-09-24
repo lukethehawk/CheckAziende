@@ -11,8 +11,93 @@ function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+
+export function distinctTaxCode(taxCode, vat) {
+  const value = String(taxCode || "").trim();
+  if (!value) return null;
+
+  const normalizedTaxCode = value.replace(/\s+/g, "").toUpperCase();
+  const normalizedVat = digitsOnly(vat);
+
+  if (
+    normalizedVat &&
+    /^(?:IT)?\d{11}$/.test(normalizedTaxCode) &&
+    normalizedTaxCode.replace(/^IT/, "") === normalizedVat
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+export function calculatePersonnelCostRatio(financials) {
+  const personnelCost = financials?.personnelCost;
+  if (!Number.isFinite(personnelCost?.value) || personnelCost.value < 0) {
+    return null;
+  }
+
+  const targetYear = Number.isFinite(personnelCost?.year)
+    ? personnelCost.year
+    : null;
+
+  let revenueValue = null;
+  let revenueYear = null;
+
+  if (targetYear && Array.isArray(financials?.balanceHistory)) {
+    const matchingRow = financials.balanceHistory.find((row) =>
+      row?.year === targetYear &&
+      Number.isFinite(row?.revenue) &&
+      row.revenue > 0
+    );
+
+    if (matchingRow) {
+      revenueValue = matchingRow.revenue;
+      revenueYear = matchingRow.year;
+    }
+  }
+
+  if (
+    !Number.isFinite(revenueValue) &&
+    Number.isFinite(financials?.revenue?.value) &&
+    financials.revenue.value > 0 &&
+    (
+      !targetYear ||
+      !Number.isFinite(financials.revenue?.year) ||
+      financials.revenue.year === targetYear
+    )
+  ) {
+    revenueValue = financials.revenue.value;
+    revenueYear = financials.revenue.year || targetYear || null;
+  }
+
+  if (!Number.isFinite(revenueValue) || revenueValue <= 0) {
+    return null;
+  }
+
+  return {
+    value: (personnelCost.value / revenueValue) * 100,
+    year: targetYear || revenueYear || null,
+    revenue: revenueValue
+  };
+}
+
+function ensurePersonnelCostRatio(financials) {
+  if (!financials || Number.isFinite(financials.personnelCostRatio?.value)) {
+    return financials;
+  }
+
+  const ratio = calculatePersonnelCostRatio(financials);
+  if (ratio) financials.personnelCostRatio = ratio;
+  return financials;
+}
+
 export function normalizeCompany(providerData, viesData, fallbackVat) {
   const vat = providerData?.vat || viesData?.vatNumber || digitsOnly(fallbackVat);
+  const financials = providerData?.financials
+    ? { ...providerData.financials }
+    : {};
+
+  ensurePersonnelCostRatio(financials);
 
   return {
     provider: providerData?.provider || null,
@@ -33,7 +118,7 @@ export function normalizeCompany(providerData, viesData, fallbackVat) {
     province: providerData?.province || null,
     region: providerData?.region || null,
     ateco: providerData?.ateco || null,
-    financials: providerData?.financials ? { ...providerData.financials } : {}
+    financials
   };
 }
 
@@ -132,6 +217,7 @@ export function enrichCompanyWithXray(company, xray) {
   }
 
   company.financials = promoteLatestFinancialYear(financials);
+  ensurePersonnelCostRatio(company.financials);
   company.providers = unique([...(company.providers || []), xray.provider]);
   company.provider = company.providers.join(" · ");
   return company;
@@ -192,6 +278,7 @@ export function enrichCompanyWithFallback(company, fallback) {
   }
 
   company.financials = promoteLatestFinancialYear(financials);
+  ensurePersonnelCostRatio(company.financials);
   company.providers = unique([
     ...(company.providers || []),
     fallback.provider

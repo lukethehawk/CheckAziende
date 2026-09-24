@@ -7,6 +7,7 @@ import {
   resolveCompanyProviders
 } from "../providers/orchestrator.js";
 import {
+  distinctTaxCode,
   enrichCompanyWithFallback,
   enrichCompanyWithXray,
   normalizeCompany
@@ -39,6 +40,8 @@ const elements = {
   ageBadge: document.querySelector("#age-badge"),
   dataCompletionStatus: document.querySelector("#data-completion-status"),
   vat: document.querySelector("#company-vat"),
+  taxCodeRow: document.querySelector("#tax-code-row"),
+  taxCode: document.querySelector("#company-tax-code"),
   address: document.querySelector("#company-address"),
   addressRow: document.querySelector("#address-row"),
   legalFormRow: document.querySelector("#legal-form-row"),
@@ -541,7 +544,7 @@ function signedPercent(value) {
   return `${sign}${formatCompactNumber(value, 1)}%`;
 }
 
-function renderFinancialProfile(evaluation) {
+function renderFinancialProfile(evaluation, financials) {
   if (!evaluation) {
     elements.financialProfileSection.classList.add("hidden");
     return;
@@ -560,6 +563,27 @@ function renderFinancialProfile(evaluation) {
         ? ` su ${observedYears} osservati`
         : "";
     rows.push(["Bilanci depositati", `${filedBalances}${observedSuffix}`]);
+  }
+
+  const personnelCost = financials?.personnelCost;
+  const personnelCostRatio = financials?.personnelCostRatio;
+
+  if (Number.isFinite(personnelCost?.value)) {
+    rows.push([
+      personnelCost.year
+        ? `Costo del personale ${personnelCost.year}`
+        : "Costo del personale",
+      formatCompactCurrency(personnelCost.value)
+    ]);
+  }
+
+  if (Number.isFinite(personnelCostRatio?.value)) {
+    rows.push([
+      personnelCostRatio.year
+        ? `Costo personale / fatturato ${personnelCostRatio.year}`
+        : "Costo personale / fatturato",
+      formatPercent(personnelCostRatio.value)
+    ]);
   }
 
   if (Number.isFinite(evaluation.metrics?.ebitdaMargin)) {
@@ -601,7 +625,9 @@ function renderFinancialProfile(evaluation) {
     (Number.isFinite(observedYears) && observedYears > 0) ||
     Number.isFinite(evaluation.metrics?.ebitdaMargin) ||
     Number.isFinite(evaluation.metrics?.netMargin) ||
-    Number.isFinite(evaluation.metrics?.revenueTrend);
+    Number.isFinite(evaluation.metrics?.revenueTrend) ||
+    Number.isFinite(personnelCost?.value) ||
+    Number.isFinite(personnelCostRatio?.value);
 
   if (!hasFinancialSignals) {
     elements.financialProfileSection.classList.add("hidden");
@@ -659,6 +685,10 @@ function renderCompany(
   elements.unidentifiedView.classList.add("hidden");
   elements.name.textContent = name;
   elements.vat.textContent = vat ? `IT ${vat}` : "—";
+
+  const visibleTaxCode = distinctTaxCode(company?.taxCode, vat);
+  setDetail(elements.taxCodeRow, elements.taxCode, visibleTaxCode);
+
   elements.address.textContent = address || "Non disponibile";
   elements.addressRow.classList.toggle("hidden", !address);
 
@@ -705,7 +735,7 @@ function renderCompany(
     company?.financials?.revenue?.year
   );
   renderProviderSource(company);
-  renderFinancialProfile(company?.evaluation);
+  renderFinancialProfile(company?.evaluation, company?.financials);
   renderContacts(currentScan);
 
   elements.companyView.classList.remove("hidden");
