@@ -62,12 +62,16 @@ export function scanCurrentPage() {
     source,
     candidates,
     score = 100,
-    { requireStrongLegalContext = false } = {}
+    {
+      requireStrongLegalContext = false,
+      keepOnlyLast = false
+    } = {}
   ) {
     if (!text || !VAT_LABEL_PATTERN.test(text)) return;
 
     VAT_NUMBER_PATTERN.lastIndex = 0;
     let match;
+    const found = [];
 
     while ((match = VAT_NUMBER_PATTERN.exec(text)) !== null) {
       const vat = digitsOnly(match[1]);
@@ -80,7 +84,7 @@ export function scanCurrentPage() {
       if (!VAT_LABEL_PATTERN.test(context)) continue;
       if (requireStrongLegalContext && !STRONG_LEGAL_CONTEXT_PATTERN.test(context)) continue;
 
-      upsertCandidate(candidates, {
+      found.push({
         vat,
         score,
         source,
@@ -88,6 +92,11 @@ export function scanCurrentPage() {
         confidence: "high",
         context
       });
+    }
+
+    const selected = keepOnlyLast ? found.slice(-1) : found;
+    for (const candidate of selected) {
+      upsertCandidate(candidates, candidate);
     }
   }
 
@@ -297,7 +306,10 @@ export function scanCurrentPage() {
       "footer testuale",
       candidates,
       105,
-      { requireStrongLegalContext: true }
+      {
+        requireStrongLegalContext: true,
+        keepOnlyLast: looksLikeSearchOrDirectoryPage
+      }
     );
   }
 
