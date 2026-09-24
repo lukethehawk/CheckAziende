@@ -431,7 +431,7 @@ async function writeCache(key, value) {
 }
 
 async function fetchSlug(slug) {
-  const key = `registro:v3:${slug}`;
+  const key = `registro:v4:${slug}`;
   const cached = await readCache(key);
   if (cached !== undefined) return cached;
 
@@ -445,13 +445,21 @@ async function fetchSlug(slug) {
     });
 
     if (!response.ok) {
-      await writeCache(key, null);
+      if (response.status === 404 || response.status === 410) {
+        await writeCache(key, null);
+      }
       return null;
     }
 
     const html = await response.text();
     const company = parseRegistroAziendePage(html, response.url || url);
-    await writeCache(key, company || null);
+
+    // Cache confirmed records and durable misses only. A transient/blocked
+    // response must not poison company discovery for 24 hours.
+    if (company) {
+      await writeCache(key, company);
+    }
+
     return company || null;
   } catch {
     return null;
@@ -624,8 +632,14 @@ export function rankRegistroAziendeCompaniesByQuery(
       const tokenMatches = queryTokens.map((token) =>
         nameTokens.some((nameToken) =>
           nameToken === token ||
-          nameToken.startsWith(token) ||
-          token.startsWith(nameToken)
+          (
+            token.length >= 3 &&
+            nameToken.length >= 3 &&
+            (
+              nameToken.startsWith(token) ||
+              token.startsWith(nameToken)
+            )
+          )
         )
       );
 
@@ -732,8 +746,8 @@ async function resolveSearchCandidates(candidates, query) {
   const resolved = [];
   const byVat = new Set();
 
-  for (let i = 0; i < discovered.length; i += 4) {
-    const batch = discovered.slice(i, i + 4);
+  for (let i = 0; i < discovered.length; i += 2) {
+    const batch = discovered.slice(i, i + 2);
     const companies = await Promise.all(
       batch.map(async (candidate) => {
         const slug = slugFromRegistroCompanyUrl(candidate?.providerUrl);
@@ -762,28 +776,22 @@ export function buildRegistroManualSearchQueries(query) {
   const normalizedQuery = clean(query);
   if (normalizedQuery.length < 3) return [];
 
-  const normalizedName = normalizeSearchName(normalizedQuery);
-  const tokens = normalizedName.split(" ").filter(Boolean);
+  const hasExplicitLegalForm =
+    /\b(?:s\.?\s*r\.?\s*l\.?\s*s?\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*n\.?\s*c\.?|s\.?\s*a\.?\s*s\.?|societa\s+cooperativa|cooperativa)\b/i
+      .test(normalizedQuery);
 
-  // RegistroAziende's public search is less reliable for very short bare
-  // company names. For an exact three-character name, retry with common legal
-  // forms so the public search can surface the city-specific company pages.
-  if (
-    normalizedName.length === 3 &&
-    tokens.length === 1 &&
-    normalizedQuery.toLowerCase() === normalizedName
-  ) {
-    return unique([
-      normalizedQuery,
-      `${normalizedQuery} srl`,
-      `${normalizedQuery} srls`,
-      `${normalizedQuery} spa`,
-      `${normalizedQuery} snc`,
-      `${normalizedQuery} sas`
-    ]);
-  }
+  if (hasExplicitLegalForm) return [normalizedQuery];
 
-  return [normalizedQuery];
+  // The public name search is inconsistent for bare names. Retry the most
+  // common legal forms while keeping relevance ranking on the original query.
+  return unique([
+    normalizedQuery,
+    `${normalizedQuery} srl`,
+    `${normalizedQuery} srls`,
+    `${normalizedQuery} spa`,
+    `${normalizedQuery} snc`,
+    `${normalizedQuery} sas`
+  ]);
 }
 
 async function searchRegistroAziendeByQuery(searchQuery, rankingQuery) {
@@ -818,7 +826,7 @@ export async function findRegistroAziendeCompaniesByName(query) {
   if (normalizedQuery.length < 3) return [];
 
   const cacheKey =
-    `registro:manual-search:v5:${normalizedQuery.toLowerCase()}`;
+    `registro:manual-search:v6:${normalizedQuery.toLowerCase()}`;
   const cached = await readCache(cacheKey, SEARCH_CACHE_TTL_MS);
   if (cached !== undefined) return cached;
 
@@ -840,18 +848,7 @@ export async function findRegistroAziendeCompaniesByName(query) {
       // For normal-length queries one successful search is enough. For a
       // three-character company name, keep trying the legal-form expansions
       // only while no relevant company has been found yet.
-      if (
-        byVat.size > 0 &&
-        searchQueries.length === 1
-      ) {
-        break;
-      }
-
-      if (
-        byVat.size > 0 &&
-        searchQueries.length > 1 &&
-        searchQuery !== normalizedQuery
-      ) {
+      if (byVat.size > 0) {
         break;
       }
     }
