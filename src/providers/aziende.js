@@ -391,6 +391,20 @@ function inferAddress(lines, text) {
 }
 
 function inferCompanyName(text, lines, fallbackName = null) {
+  const rawHeader = String(text || "").match(
+    /Ragione\s+Sociale\s*:\s*([^\r\n]+)/i
+  );
+
+  if (rawHeader?.[1]) {
+    const value = sanitizeField(
+      rawHeader[1].replace(
+        /\s+(?:Codice\s+ATECO\s*:|Anteprima\b|Partita\s+IVA\b|Indirizzo\b|Fatturato\b).*$/i,
+        ""
+      )
+    );
+    if (value) return value;
+  }
+
   const compact = clean(text);
   const header = compact.match(
     /Ragione\s+Sociale\s*:\s*(.+?)(?=\s+(?:Codice\s+ATECO\s*:|Anteprima\b|Partita\s+IVA\b|Indirizzo\b|Fatturato\b|$))/i
