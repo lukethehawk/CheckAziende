@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  calculatePersonnelCostRatio,
+  distinctTaxCode,
   enrichCompanyWithFallback,
   enrichCompanyWithXray,
   normalizeCompany
@@ -125,4 +127,78 @@ test("Xray can still provide a name when no other source has one", () => {
   });
 
   assert.equal(company.name, "FUTURE TECH SRL");
+});
+
+
+test("personnel cost ratio uses the matching financial year", () => {
+  const ratio = calculatePersonnelCostRatio({
+    revenue: { value: 1_820_000, year: 2025 },
+    personnelCost: { value: 151_312, year: 2024 },
+    balanceHistory: [
+      { year: 2025, revenue: 1_820_000 },
+      { year: 2024, revenue: 1_992_222 }
+    ]
+  });
+
+  assert.equal(ratio.year, 2024);
+  assert.equal(ratio.revenue, 1_992_222);
+  assert.ok(Math.abs(ratio.value - 7.595145320147853) < 0.0001);
+});
+
+test("canonical personnel cost ratio survives a newer fallback headline year", () => {
+  const company = normalizeCompany({
+    provider: "CompanyReports.it",
+    vat: "11295150152",
+    financials: {
+      revenue: {
+        value: 1_992_222,
+        year: 2024,
+        source: "CompanyReports.it",
+        isFiled: true
+      },
+      personnelCost: {
+        value: 151_312,
+        year: 2024,
+        source: "CompanyReports.it",
+        isFiled: true
+      }
+    }
+  }, null, "11295150152");
+
+  const originalRatio = company.financials.personnelCostRatio.value;
+
+  enrichCompanyWithFallback(company, {
+    provider: "RegistroAziende.it",
+    financials: {
+      revenue: {
+        value: 1_820_000,
+        year: 2025,
+        source: "RegistroAziende.it",
+        isFiled: true
+      },
+      balanceHistory: [
+        { year: 2025, revenue: 1_820_000, source: "RegistroAziende.it", isFiled: true },
+        { year: 2024, revenue: 1_992_222, source: "RegistroAziende.it", isFiled: true }
+      ]
+    }
+  });
+
+  assert.equal(company.financials.revenue.year, 2025);
+  assert.equal(company.financials.personnelCostRatio.year, 2024);
+  assert.equal(company.financials.personnelCostRatio.value, originalRatio);
+});
+
+test("tax code is hidden when it duplicates VAT and kept when distinct", () => {
+  assert.equal(
+    distinctTaxCode("11295150152", "11295150152"),
+    null
+  );
+  assert.equal(
+    distinctTaxCode("IT11295150152", "11295150152"),
+    null
+  );
+  assert.equal(
+    distinctTaxCode("RSSMRA80A01F205X", "11295150152"),
+    "RSSMRA80A01F205X"
+  );
 });
