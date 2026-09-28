@@ -57,12 +57,15 @@ La pagina corrente viene analizzata localmente solo quando l'utente apre l'esten
 ## Installazione temporanea su Firefox
 
 1. Clona o scarica il repository.
-2. Apri `about:debugging#/runtime/this-firefox`.
-3. Clicca **Carica componente aggiuntivo temporaneo**.
-4. Seleziona `manifest.json`.
-5. Apri un sito e clicca CheckAziende.
+2. Esegui `npm run build:stores` per generare il pacchetto Firefox in `dist/firefox`.
+3. Apri `about:debugging#/runtime/this-firefox`.
+4. Clicca **Carica componente aggiuntivo temporaneo**.
+5. Seleziona `dist/firefox/manifest.json`.
+6. Apri un sito e clicca CheckAziende.
 
-Dopo una modifica usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
+Il `manifest.json` nella radice è il manifest MV3 per Chromium: usa un `background.service_worker`, che Firefox non supporta. Per questo l'installazione temporanea su Firefox richiede il manifest generato dal build, che usa `background.scripts` con `type: module`.
+
+Dopo una modifica esegui di nuovo `npm run build:stores` e usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
 
 ## Test
 
@@ -161,6 +164,8 @@ La versione 0.6.0 introduce un orchestratore dei provider con priorità alla vel
 - eventuali conflitti su stato, fatturato o utile vengono registrati nella struttura di verifica per il futuro score di affidabilità dei dati.
 
 RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
+
+La cache aggregata `provider-orchestrator:v9:<P.IVA>` è gestita dal background MV3 tramite messaggi runtime: `src/background/provider-snapshot.js` legge e fonde gli snapshot in `storage.local`, serializzando le scritture per P.IVA. `src/providers/snapshot-client.js` è il confine usato dall’orchestratore; errori del background equivalgono a una cache non disponibile. Ricerche e parsing dei provider, Promise di arricchimento, stale-while-revalidate e rendering rimangono nel popup. Il build usa uno script background Firefox e un service worker modulo nei browser Chromium.
 
 ReportAziende resta una possibile fonte futura tramite API autenticata. CompanyReports.it è invece ora integrato nel fast path tramite la scheda pubblica per P.IVA.
 

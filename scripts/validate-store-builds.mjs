@@ -4,7 +4,9 @@ import { inflateSync } from "node:zlib";
 
 const root = process.cwd();
 const targets = ["firefox", "chrome", "edge", "opera"];
+const backgroundPath = "src/background/service-worker.js";
 const manifests = {};
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 function parsePng(buffer, expectedSize, label) {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -133,7 +135,31 @@ for (const target of targets) {
   }
 }
 
+const rootManifest = JSON.parse(
+  await readFile(join(root, "manifest.json"), "utf8")
+);
+const rootBackground = rootManifest.background || {};
+if (rootManifest.manifest_version !== 3 ||
+    rootBackground.type !== "module" ||
+    rootBackground.service_worker !== backgroundPath ||
+    hasOwn(rootBackground, "scripts")) {
+  throw new Error(
+    "root manifest: expected MV3 module background service worker without background.scripts"
+  );
+}
+await readFile(join(root, rootBackground.service_worker));
+
 const firefox = manifests.firefox;
+const firefoxBackground = firefox.background || {};
+if (firefoxBackground.type !== "module" ||
+    hasOwn(firefoxBackground, "service_worker") ||
+    !hasOwn(firefoxBackground, "scripts") ||
+    !Array.isArray(firefoxBackground.scripts) ||
+    firefoxBackground.scripts.length !== 1 ||
+    firefoxBackground.scripts[0] !== backgroundPath) {
+  throw new Error("firefox: expected module background script, not service worker");
+}
+await readFile(join(root, "dist", "firefox", firefoxBackground.scripts[0]));
 const required =
   firefox.browser_specific_settings?.gecko?.data_collection_permissions?.required ||
   [];
@@ -159,6 +185,15 @@ for (const size of [16, 32, 48, 128]) {
 for (const target of ["chrome", "edge", "opera"]) {
   const manifest = manifests[target];
 
+  const chromiumBackground = manifest.background || {};
+  if (chromiumBackground.type !== "module" ||
+      hasOwn(chromiumBackground, "scripts") ||
+      chromiumBackground.service_worker !== backgroundPath) {
+    throw new Error(
+      `${target}: expected module background service worker without background.scripts`
+    );
+  }
+  await readFile(join(root, "dist", target, chromiumBackground.service_worker));
   if (manifest.browser_specific_settings) {
     throw new Error(`${target}: Firefox-only browser_specific_settings present`);
   }

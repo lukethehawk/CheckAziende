@@ -9,10 +9,15 @@ const baseManifest = JSON.parse(
 
 const targets = ["firefox", "chrome", "edge", "opera"];
 const sharedPaths = ["src", "assets", "LICENSE", "README.md", "PRIVACY.md"];
+const backgroundPath = "src/background/service-worker.js";
 
 function chromiumManifest(base) {
   const manifest = structuredClone(base);
   delete manifest.browser_specific_settings;
+  manifest.background = {
+    service_worker: backgroundPath,
+    type: "module"
+  };
 
   manifest.action = {
     ...manifest.action,
@@ -36,6 +41,11 @@ function chromiumManifest(base) {
 
 function firefoxManifest(base) {
   const manifest = structuredClone(base);
+  // Firefox MV3 uses a module background script array instead of a service worker.
+  manifest.background = {
+    scripts: [backgroundPath],
+    type: "module"
+  };
   manifest.browser_specific_settings ||= {};
   manifest.browser_specific_settings.gecko ||= {};
   manifest.browser_specific_settings.gecko.data_collection_permissions = {

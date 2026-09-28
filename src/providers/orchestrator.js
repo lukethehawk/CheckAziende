@@ -1,14 +1,11 @@
 import { findAziendeCompanyByVat } from "./aziende.js";
 import { findXrayCompanyByVat } from "./xray.js";
 import { findRegistroAziendeCompanyByVat } from "./registroaziende.js";
-
+import { readSnapshot, writeSnapshot } from "./snapshot-client.js";
 const PRIMARY_BUDGET_MS = 1600;
 const XRAY_BUDGET_MS = 900;
 const FALLBACK_BUDGET_MS = 550;
 const ENRICHMENT_BUDGET_MS = 500;
-const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
-const STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const api = globalThis.browser ?? globalThis.chrome;
 
 function timeoutValue(promise, ms, fallback = null) {
   return Promise.race([
@@ -343,67 +340,6 @@ export function needsFallback(company, options = {}) {
     financialHistoryNeedsRefresh(financials, options);
 }
 
-function snapshotKey(vat) {
-  return `provider-orchestrator:v9:${vat}`;
-}
-
-async function readSnapshot(vat) {
-  try {
-    const stored = await api.storage.local.get(snapshotKey(vat));
-    const entry = stored?.[snapshotKey(vat)];
-    if (!entry) return null;
-
-    const age = Date.now() - entry.cachedAt;
-    if (age > STALE_TTL_MS) return null;
-
-    return {
-      value: entry.value,
-      age,
-      stale: age > SNAPSHOT_TTL_MS
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function writeSnapshot(vat, result) {
-  try {
-    const key = snapshotKey(vat);
-    const stored = await api.storage.local.get(key);
-    const previous = stored?.[key]?.value || {};
-
-    const aziende = result.aziende || previous.aziende || null;
-    const registro = result.registro || previous.registro || null;
-    const xray = result.xray || previous.xray || null;
-
-    // Once Aziende.it has resolved, never let a later async fallback write
-    // downgrade the canonical company back to RegistroAziende.
-    const primary =
-      aziende ||
-      result.primary ||
-      previous.primary ||
-      registro ||
-      null;
-
-    await api.storage.local.set({
-      [key]: {
-        cachedAt: Date.now(),
-        value: {
-          primary,
-          aziende,
-          xray,
-          registro,
-          verification:
-            result.verification ??
-            previous.verification ??
-            null
-        }
-      }
-    });
-  } catch {
-    // Snapshot cache is optional.
-  }
-}
 
 export function missingProviderRefreshPlan(value) {
   const primary =
