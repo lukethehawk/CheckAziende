@@ -9,6 +9,7 @@ Casi coperti:
 - Future Tech: anagrafica CompanyReports.it + bilancio RegistroAziende;
 - Rubino: CompanyReports.it + Xray Finance;
 - MPS Monitor: storico RegistroAziende;
+- Aziende.it: ricerca pubblica per P.IVA, profilo con P.IVA verificata e confronto di settore (con anno ricostruito e senza), pagina di challenge anti-bot;
 - profilo azienda su Xray: la P.IVA della società mostrata non deve diventare proprietario del sito;
 - portale Creditsafe su sottodominio: dominio/brand devono produrre solo una corrispondenza prudente;
 - sito corporate con P.IVA nel footer: evidenza forte.

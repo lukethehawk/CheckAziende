@@ -1,5 +1,9 @@
 import { findAziendeCompanyByVat } from "./aziende.js";
-import { findXrayCompanyByVat } from "./xray.js";
+import { findCompanyReportsCompanyByVat } from "./companyreports.js";
+import {
+  buildXraySlugCandidates,
+  findXrayCompanyByVat
+} from "./xray.js";
 import { findRegistroAziendeCompanyByVat } from "./registroaziende.js";
 import { readSnapshot, writeSnapshot } from "./snapshot-client.js";
 const PRIMARY_BUDGET_MS = 1600;
@@ -69,8 +73,8 @@ export function compareProviderData(primary, verifier) {
   };
 }
 
-export function selectCanonicalPrimary(aziende, registro) {
-  return aziende || registro || null;
+export function selectCanonicalPrimary(companyReports, registro) {
+  return companyReports || registro || null;
 }
 
 export function mergeProviderResultState(current = {}, patch = {}) {
@@ -79,7 +83,7 @@ export function mergeProviderResultState(current = {}, patch = {}) {
     ...(patch || {})
   };
 
-  for (const key of ["primary", "aziende", "xray", "registro", "verification"]) {
+  for (const key of ["primary", "companyReports", "aziende", "xray", "registro", "verification"]) {
     if (
       (patch?.[key] === null || patch?.[key] === undefined) &&
       current?.[key] !== null &&
@@ -89,13 +93,12 @@ export function mergeProviderResultState(current = {}, patch = {}) {
     }
   }
 
-  // Aziende.it remains canonical once it has been observed. A later async
-  // enrichment must never downgrade the visible primary back to a fallback.
-  if (merged.aziende) {
-    merged.primary = merged.aziende;
-  } else if (!merged.primary && merged.registro) {
-    merged.primary = merged.registro;
-  }
+  // CompanyReports.it remains canonical once it has been observed. The
+  // optional Aziende.it enrichment only contributes `sectorComparison`, so it
+  // must never replace the visible primary, and a later fallback update cannot
+  // downgrade an already resolved canonical record.
+  const canonical = merged.companyReports || merged.registro || null;
+  if (canonical) merged.primary = canonical;
 
   return merged;
 }
@@ -342,20 +345,50 @@ export function needsFallback(company, options = {}) {
 
 
 export function missingProviderRefreshPlan(value) {
-  const primary =
-    value?.aziende ||
-    value?.primary ||
+  const canonical =
+    value?.companyReports ||
     value?.registro ||
     null;
 
+  // When the canonical records are still missing, the VAT may only be carried
+  // by an optional provider (a progressive snapshot persisted before the
+  // canonical record arrived). Without this fallback such a snapshot would
+  // look complete and never refresh.
+  const primary =
+    canonical ||
+    value?.primary ||
+    value?.xray ||
+    value?.aziende ||
+    null;
+
+  const hasVat = Boolean(primary?.vat);
+
   return {
-    aziende: Boolean(primary) && !value?.aziende,
-    xray: Boolean(primary?.vat) && !value?.xray,
+    companyReports: hasVat && !value?.companyReports,
+    // The optional Aziende.it sector enrichment is independent of the
+    // canonical record, so a fresh snapshot that lacks it still gets one.
+    aziende: hasVat && !value?.aziende,
+    xray: hasVat && !value?.xray,
     registro:
-      Boolean(primary?.vat) &&
+      hasVat &&
       !value?.registro &&
-      needsFallback(primary)
+      needsFallback(canonical || value?.primary || null)
   };
+}
+
+// A reordered canonical name can promote an existing base into the direct
+// (first four) or numbered (first three) search window. Comparing all ten
+// candidates would incorrectly skip the only lookup that can reach it.
+function xrayCanonicalAddsCandidates(names, canonicalName) {
+  if (!canonicalName) return false;
+
+  const initial = buildXraySlugCandidates(names);
+  const canonical = buildXraySlugCandidates([canonicalName, ...names]);
+  const direct = new Set(initial.slice(0, 4));
+  const numbered = new Set(initial.slice(0, 3));
+
+  return canonical.slice(0, 4).some((slug) => !direct.has(slug)) ||
+    canonical.slice(0, 3).some((slug) => !numbered.has(slug));
 }
 
 async function resolveNetwork({
@@ -364,7 +397,8 @@ async function resolveNetwork({
   provinceHints = [],
   cityHints = []
 }) {
-  const aziendePromise = findAziendeCompanyByVat(vat, {
+  // CompanyReports.it is the canonical record and leads the critical path.
+  const companyReportsPromise = findCompanyReportsCompanyByVat(vat, {
     names,
     provinceHints
   }).catch(() => null);
@@ -374,39 +408,44 @@ async function resolveNetwork({
   }).catch(() => null);
 
   // Start the verifier immediately using the page/VIES hints we already have.
-  // If we later obtain a better canonical name from Aziende.it we can retry,
-  // but in most cases this removes RegistroAziende from the critical path.
+  // If we later obtain a better canonical name from CompanyReports.it we can
+  // retry, but in most cases this removes RegistroAziende from the critical
+  // path.
   const initialRegistroPromise = findRegistroAziendeCompanyByVat(vat, {
     names,
     cityHints
   }).catch(() => null);
 
-  const [aziendeFast, xrayFast] = await Promise.all([
-    timeoutValue(aziendePromise, PRIMARY_BUDGET_MS),
+  const [companyReportsFast, xrayFast] = await Promise.all([
+    timeoutValue(companyReportsPromise, PRIMARY_BUDGET_MS),
     timeoutValue(initialXrayPromise, XRAY_BUDGET_MS)
   ]);
 
-  const buildRegistroPromise = (azienda = null) =>
+  const buildRegistroPromise = (companyReports = null) =>
     findRegistroAziendeCompanyByVat(vat, {
-      names: [azienda?.name, ...names].filter(Boolean),
-      cityHints: [azienda?.city, ...cityHints].filter(Boolean)
+      names: [companyReports?.name, ...names].filter(Boolean),
+      cityHints: [companyReports?.city, ...cityHints].filter(Boolean)
     }).catch(() => null);
 
   let registro = null;
+  let nameBasedRegistroPromise = null;
 
   // RegistroAziende is a verifier/fallback. It may fill gaps, but it should
-  // never replace a richer Aziende.it record when the latter is available.
-  if (needsFallback(aziendeFast)) {
+  // never replace a richer CompanyReports.it record when the latter is
+  // available.
+  if (needsFallback(companyReportsFast)) {
     registro = await timeoutValue(
       initialRegistroPromise,
       FALLBACK_BUDGET_MS
     );
 
     // The speculative lookup can miss when only the canonical company name
-    // resolves the public RegistroAziende slug.
-    if (!registro && aziendeFast?.name) {
+    // resolves the public RegistroAziende slug. Keep that promise alive so the
+    // progressive channel reuses the lookup instead of issuing it twice.
+    if (!registro && companyReportsFast?.name) {
+      nameBasedRegistroPromise = buildRegistroPromise(companyReportsFast);
       registro = await timeoutValue(
-        buildRegistroPromise(aziendeFast),
+        nameBasedRegistroPromise,
         ENRICHMENT_BUDGET_MS
       );
     }
@@ -416,12 +455,16 @@ async function resolveNetwork({
   let canonicalXrayPromise = null;
 
   // Xray matching is much more reliable once the canonical company name is
-  // known. Keep the canonical retry promise alive after the short UI budget
-  // so the background updater can reuse the same lookup instead of waiting
-  // for a noisier speculative search to finish first.
-  if (!xray && aziendeFast?.name) {
+  // known, but only when that name unlocks new slug candidates. When the
+  // speculative search already covers them, retrying would just duplicate the
+  // same requests, so it is skipped.
+  if (
+    !xray &&
+    companyReportsFast?.name &&
+    xrayCanonicalAddsCandidates(names, companyReportsFast.name)
+  ) {
     canonicalXrayPromise = findXrayCompanyByVat(vat, {
-      names: [aziendeFast.name, ...names]
+      names: [companyReportsFast.name, ...names]
     }).catch(() => null);
 
     xray = await timeoutValue(
@@ -430,127 +473,187 @@ async function resolveNetwork({
     );
   }
 
-  const primary = selectCanonicalPrimary(aziendeFast, registro);
+  const primary = selectCanonicalPrimary(companyReportsFast, registro);
   const verification = compareProviderData(
-    aziendeFast || primary,
+    companyReportsFast || primary,
     registro
   );
 
-  const backgroundCanonical = aziendeFast
-    ? null
-    : aziendePromise.then(async (azienda) => {
-        if (!azienda) return null;
+  // Late providers publish their own progressive patch the moment their own
+  // lookup settles. 'lateProviders' is the shared latch: a channel may read
+  // what the other one already produced, but it must never wait for it,
+  // otherwise a slow optional provider hides the canonical record until the
+  // popup is reopened.
+  const lateProviders = {
+    companyReports: companyReportsFast || null,
+    registro: registro || null
+  };
 
-        let richerXray = xray;
-        if (!richerXray) {
-          richerXray = await findXrayCompanyByVat(vat, {
-            names: [azienda.name, ...names].filter(Boolean)
+  const xrayPublished = { value: Boolean(xray) };
+
+  // Every lookup a channel owns is exposed as a progressive pending update
+  // and persists its own snapshot slot: nothing is left as a fire-and-forget
+  // loser.
+  const pendingUpdates = [];
+
+  if (!companyReportsFast) {
+    pendingUpdates.push({
+      provider: "companyReports",
+      promise: companyReportsPromise
+        .then(async (companyReports) => {
+          if (!companyReports) return null;
+
+          lateProviders.companyReports = companyReports;
+
+          const update = {
+            primary: companyReports,
+            companyReports,
+            verification: compareProviderData(
+              companyReports,
+              lateProviders.registro
+            )
+          };
+
+          // Only attach the RegistroAziende record when it is already known:
+          // a null would have to be ignored anyway, and waiting for it here is
+          // exactly what delayed the canonical patch.
+          if (lateProviders.registro) update.registro = lateProviders.registro;
+
+          await writeSnapshot(vat, update);
+          return update;
+        })
+        .catch(() => null)
+    });
+  }
+
+  if (!registro) {
+    const registroChannel = (async () => {
+      // Reuse the speculative lookup: it is the exact VAT-driven request the
+      // first render already started.
+      let value = await initialRegistroPromise;
+
+      if (!value) {
+        // In some cases only the canonical company name resolves the public
+        // RegistroAziende slug. Reuse a name-based lookup already started
+        // above instead of issuing the same request twice.
+        const canonical =
+          lateProviders.companyReports || await companyReportsPromise;
+
+        value = nameBasedRegistroPromise
+          ? await nameBasedRegistroPromise
+          : canonical?.name
+            ? await buildRegistroPromise(canonical)
+            : null;
+      }
+
+      if (!value) return null;
+
+      lateProviders.registro = value;
+
+      const canonical =
+        lateProviders.companyReports || companyReportsFast || null;
+
+      // Persist only the slot this channel resolved. The canonical record and
+      // Xray are owned by their own channels and a null here must never
+      // overwrite them.
+      const update = {
+        registro: value,
+        verification: compareProviderData(canonical, value)
+      };
+
+      await writeSnapshot(vat, update);
+      return update;
+    })().catch(() => null);
+
+    pendingUpdates.push({ provider: "registro", promise: registroChannel });
+  }
+
+  if (!xray) {
+    // The speculative search started at the very beginning may still be
+    // walking Xray profiles: keep it alive as its own progressive channel.
+    pendingUpdates.push({
+      provider: "xray",
+      promise: initialXrayPromise
+        .then(async (value) => {
+          if (!value) return null;
+          xrayPublished.value = true;
+          await writeSnapshot(vat, { xray: value });
+          return { xray: value };
+        })
+        .catch(() => null)
+    });
+
+    // Canonical retry channel: waits for the canonical name when it is still
+    // unknown, reuses the lookup already started inside the fast window (if
+    // any) or starts a single new one, and never issues a request the
+    // speculative search already covers. It is only exposed when a retry is
+    // still possible: either the canonical name is unknown yet, or a retry
+    // lookup was already started during the fast window.
+    if (canonicalXrayPromise || !companyReportsFast) {
+      const canonicalXrayChannel = (async () => {
+        let lookup = canonicalXrayPromise;
+
+        if (!lookup) {
+          const record = companyReportsFast || await companyReportsPromise;
+          if (!record?.name) return null;
+          if (xrayPublished.value) return null;
+          if (!xrayCanonicalAddsCandidates(names, record.name)) return null;
+
+          lookup = findXrayCompanyByVat(vat, {
+            names: [record.name, ...names]
           }).catch(() => null);
         }
 
-        let richerRegistro = registro || await initialRegistroPromise;
-        if (!richerRegistro) {
-          richerRegistro = await buildRegistroPromise(azienda);
-        }
+        const value = await lookup;
+        return value || null;
+      })().catch(() => null);
 
-        const update = {
-          primary: azienda,
-          aziende: azienda,
-          xray: richerXray,
-          registro: richerRegistro,
-          verification: compareProviderData(azienda, richerRegistro)
-        };
-
-        await writeSnapshot(vat, update);
-        return update;
+      pendingUpdates.push({
+        provider: "xray",
+        promise: canonicalXrayChannel
+          .then(async (value) => {
+            if (!value) return null;
+            xrayPublished.value = true;
+            await writeSnapshot(vat, { xray: value });
+            return { xray: value };
+          })
+          .catch(() => null)
       });
+    }
+  }
 
-  const backgroundXray = xray
-    ? null
-    : (async () => {
-        if (canonicalXrayPromise) {
-          const canonical = await canonicalXrayPromise;
+  // Aziende.it sector comparison is optional enrichment. It starts only after
+  // the fast result is ready, so it can never delay the first render, persists
+  // on arrival and hands the popup a patch that cannot touch the canonical
+  // primary.
+  pendingUpdates.push({
+    provider: "aziende",
+    promise: findAziendeCompanyByVat(vat, {
+      names: [companyReportsFast?.name, ...names].filter(Boolean),
+      provinceHints,
+      cityHints
+    })
+      .catch(() => null)
+      .then(async (azienda) => {
+        if (!azienda) return null;
 
-          if (canonical) {
-            await writeSnapshot(vat, {
-              primary,
-              aziende: aziendeFast,
-              xray: canonical,
-              registro,
-              verification
-            });
-            return canonical;
-          }
-        }
+        // Only merge the new slot: other providers may have completed after
+        // the first render and already updated their snapshot fields.
+        await writeSnapshot(vat, { aziende: azienda });
 
-        const initial = await initialXrayPromise;
-        if (initial) {
-          await writeSnapshot(vat, {
-            primary,
-            aziende: aziendeFast,
-            xray: initial,
-            registro,
-            verification
-          });
-          return initial;
-        }
-
-        const azienda = aziendeFast || await aziendePromise;
-        if (!azienda?.name) return null;
-
-        const retry = await findXrayCompanyByVat(vat, {
-          names: [azienda.name, ...names].filter(Boolean)
-        }).catch(() => null);
-
-        if (retry) {
-          await writeSnapshot(vat, {
-            primary: azienda || primary,
-            aziende: azienda || aziendeFast,
-            xray: retry,
-            registro,
-            verification: compareProviderData(azienda || primary, registro)
-          });
-        }
-
-        return retry;
-      })();
-
-  const backgroundVerification = registro
-    ? null
-    : initialRegistroPromise.then(async (initialValue) => {
-        const eventualAziende = aziendeFast || await aziendePromise;
-        let value = initialValue;
-
-        if (!value && eventualAziende?.name) {
-          value = await buildRegistroPromise(eventualAziende);
-        }
-
-        const canonical = eventualAziende || primary || value;
-        const update = {
-          registro: value,
-          verification: compareProviderData(canonical, value)
-        };
-
-        await writeSnapshot(vat, {
-          primary: canonical,
-          aziende: eventualAziende,
-          xray,
-          registro: value,
-          verification: update.verification
-        });
-
-        return update;
-      });
+        return { aziende: azienda };
+      })
+      .catch(() => null)
+  });
 
   const result = {
     primary,
-    aziende: aziendeFast,
+    companyReports: companyReportsFast,
+    aziende: null,
     xray,
     registro,
     verification,
-    backgroundCanonical,
-    backgroundXray,
-    backgroundVerification
+    pendingUpdates
   };
 
   await writeSnapshot(vat, result);
@@ -562,107 +665,129 @@ export async function resolveCompanyProviders(args) {
   const cached = await readSnapshot(vat);
 
   if (cached?.value) {
-    const backgroundRefresh = cached.stale
-      ? resolveNetwork(args).catch(() => null)
-      : null;
+    if (cached.stale) {
+      // Stale-while-revalidate: the popup gets the cached record immediately
+      // and a single nested refresh pending update. The fresh result carries
+      // its own 'pendingUpdates', which the popup subscribes to recursively.
+      const refresh = resolveNetwork(args).catch(() => null);
 
-    let backgroundCanonical = null;
-    let backgroundXray = null;
-    let backgroundVerification = null;
+      return {
+        ...cached.value,
+        fromCache: true,
+        stale: true,
+        pendingUpdates: [{ provider: "refresh", promise: refresh }]
+      };
+    }
 
-    if (!cached.stale) {
-      const plan = missingProviderRefreshPlan(cached.value);
-      const primary =
-        cached.value.aziende ||
-        cached.value.primary ||
-        cached.value.registro ||
-        null;
-      const names = [
-        primary?.name,
-        ...(args?.names || [])
+    const plan = missingProviderRefreshPlan(cached.value);
+    const primary =
+      cached.value.companyReports ||
+      cached.value.primary ||
+      cached.value.registro ||
+      null;
+    const names = [
+      primary?.name,
+      ...(args?.names || [])
+    ].filter(Boolean);
+    const provinceHints = args?.provinceHints || [];
+    const cityHints = args?.cityHints || [];
+    const pendingUpdates = [];
+
+    if (plan.companyReports) {
+      pendingUpdates.push({
+        provider: "companyReports",
+        promise: findCompanyReportsCompanyByVat(vat, {
+          names,
+          provinceHints
+        })
+          .then(async (companyReports) => {
+            if (!companyReports) return null;
+
+            const update = {
+              primary: companyReports,
+              companyReports,
+              verification: compareProviderData(
+                companyReports,
+                cached.value.registro || null
+              )
+            };
+
+            await writeSnapshot(vat, update);
+            return update;
+          })
+          .catch(() => null)
+      });
+    }
+
+    if (plan.registro) {
+      const registroCities = [
+        primary?.city,
+        ...cityHints
       ].filter(Boolean);
 
-      if (plan.aziende) {
-        backgroundCanonical = findAziendeCompanyByVat(vat, {
+      pendingUpdates.push({
+        provider: "registro",
+        promise: findRegistroAziendeCompanyByVat(vat, {
           names,
-          provinceHints: args?.provinceHints || []
-        }).then(async (azienda) => {
-          if (!azienda) return null;
+          cityHints: registroCities
+        })
+          .then(async (registro) => {
+            if (!registro) return null;
 
-          const update = {
-            primary: azienda,
-            aziende: azienda,
-            xray: cached.value.xray || null,
-            registro: cached.value.registro || null,
-            verification: compareProviderData(
-              azienda,
-              cached.value.registro || null
-            )
-          };
+            const canonical =
+              cached.value.companyReports || primary || registro;
 
-          await writeSnapshot(vat, update);
-          return update;
-        }).catch(() => null);
-      }
+            const update = {
+              registro,
+              verification: compareProviderData(canonical, registro)
+            };
 
-      if (plan.xray) {
-        backgroundXray = findXrayCompanyByVat(vat, {
+            await writeSnapshot(vat, update);
+            return update;
+          })
+          .catch(() => null)
+      });
+    }
+
+    if (plan.xray) {
+      pendingUpdates.push({
+        provider: "xray",
+        promise: findXrayCompanyByVat(vat, {
           names
-        }).then(async (xray) => {
-          if (!xray) return null;
+        })
+          .then(async (xray) => {
+            if (!xray) return null;
 
-          await writeSnapshot(vat, {
-            primary,
-            aziende: cached.value.aziende || null,
-            xray,
-            registro: cached.value.registro || null,
-            verification: cached.value.verification || null
-          });
+            await writeSnapshot(vat, { xray });
+            return { xray };
+          })
+          .catch(() => null)
+      });
+    }
 
-          return xray;
-        }).catch(() => null);
-      }
-
-      if (plan.registro) {
-        backgroundVerification = findRegistroAziendeCompanyByVat(vat, {
+    if (plan.aziende) {
+      pendingUpdates.push({
+        provider: "aziende",
+        promise: findAziendeCompanyByVat(vat, {
           names,
-          cityHints: [
-            primary?.city,
-            ...(args?.cityHints || [])
-          ].filter(Boolean)
-        }).then(async (registro) => {
-          if (!registro) return null;
+          provinceHints,
+          cityHints
+        })
+          .then(async (azienda) => {
+            if (!azienda) return null;
 
-          const canonical = cached.value.aziende || primary || registro;
-          const verification = compareProviderData(
-            canonical,
-            registro
-          );
-
-          await writeSnapshot(vat, {
-            primary: canonical,
-            aziende: cached.value.aziende || null,
-            xray: cached.value.xray || null,
-            registro,
-            verification
-          });
-
-          return {
-            registro,
-            verification
-          };
-        }).catch(() => null);
-      }
+            await writeSnapshot(vat, { aziende: azienda });
+            return { aziende: azienda };
+          })
+          .catch(() => null)
+      });
     }
 
     return {
       ...cached.value,
       fromCache: true,
-      stale: cached.stale,
-      backgroundCanonical,
-      backgroundXray,
-      backgroundVerification,
-      backgroundRefresh
+      stale: false,
+      pendingUpdates
     };
   }
 
@@ -670,7 +795,6 @@ export async function resolveCompanyProviders(args) {
   return {
     ...result,
     fromCache: false,
-    stale: false,
-    backgroundRefresh: null
+    stale: false
   };
 }

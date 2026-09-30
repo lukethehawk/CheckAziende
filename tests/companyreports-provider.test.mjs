@@ -1,0 +1,501 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  buildSlugCandidates,
+  inferCompanyStatus,
+  legalNameLookupVariants,
+  parseCompanyReportsText,
+  parseBalanceHistoryRows,
+  shouldCacheCompanyReportsMiss,
+  slugifyCompanyName
+} from "../src/providers/companyreports.js";
+
+test("keeps filed amounts when HTML text joins a year and following euro value", () => {
+  const company = parseCompanyReportsText(`
+RUBINO - S.R.L.
+Partita IVA 05488440651
+Stato Attività Attiva
+Fatturato 2024€ 2.277.793
+Utile 2024€ 111.548
+`, { name: "RUBINO - S.R.L." });
+
+  assert.equal(company.financials.revenue.value, 2277793);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 111548);
+  assert.equal(company.financials.revenue.isFiled, true);
+});
+
+test("slugifies Italian legal forms like CompanyReports.it URLs", () => {
+  assert.equal(
+    slugifyCompanyName("COMPUTER GROSS S.P.A."),
+    "computer-gross-s-p-a"
+  );
+
+  assert.equal(
+    slugifyCompanyName("Future Tech SRL"),
+    "future-tech-srl"
+  );
+});
+
+test("builds legal-form variants for a brand-only name", () => {
+  const slugs = buildSlugCandidates(["MPS Monitor"]);
+
+  assert.ok(slugs.includes("mps-monitor"));
+  assert.ok(slugs.includes("mps-monitor-srl"));
+  assert.ok(slugs.includes("mps-monitor-s-p-a"));
+});
+
+test("parses Future Tech financial and registry data", () => {
+  const text = `
+FUTURE TECH SRL
+Attiva SOCIETA' A RESPONSABILITA' LIMITATA Basiglio (MI) ATECO 46.50.1 dal 1994
+P.IVA 11295150152 REA MI-1453877
+Sede legale: Residenze Acacie 601, 20079 Basiglio (MI)
+€ 1.992.222
+Fatturato 2024
+€ 236.014
+Utile 2024
+3
+Dipendenti
+€ 18.000
+Capitale sociale
+11,8%
+Margine netto
+Attività
+Commercio all'ingrosso di computer, unita' periferiche e software
+Ragione Sociale
+Future Tech Srl
+Natura Giuridica
+SOCIETA' A RESPONSABILITA' LIMITATA
+Partita IVA
+11295150152
+Data Iscrizione
+15/09/1994
+PEC
+amministrazione@pec.future-tech.it
+Codice Destinatario SDI
+T04ZHR3
+Comune
+Basiglio
+Provincia
+Milano
+Regione
+Lombardia
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "FUTURE TECH SRL",
+    url: "https://www.companyreports.it/future-tech-srl"
+  });
+
+  assert.equal(company.vat, "11295150152");
+  assert.equal(company.name, "FUTURE TECH SRL");
+  assert.equal(company.rea, "MI-1453877");
+  assert.equal(company.ateco.code, "46.50.1");
+  assert.equal(company.financials.revenue.value, 1992222);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 236014);
+  assert.equal(company.financials.employees.value, 3);
+  assert.equal(Math.round(company.financials.netMargin * 10) / 10, 11.8);
+  assert.equal(company.pec, "amministrazione@pec.future-tech.it");
+});
+
+test("parses a large company without corrupting year into revenue", () => {
+  const text = `
+COMPUTER GROSS S.P.A.
+Attiva SOCIETA' PER AZIONI Empoli (FI) ATECO 46.50.1 dal 1997
+P.IVA 04801490485 REA FI-487781
+Sede legale: Via Del Pino 1, 50053 Empoli (FI)
+€ 1.821.753.823
+Fatturato 2025
+€ 39.409.089
+Utile 2025
+368
+Dipendenti
+Ragione Sociale
+Computer Gross S.p.a.
+Natura Giuridica
+SOCIETA' PER AZIONI
+Data Iscrizione
+22/01/1997
+PEC
+computergross@pec.computergross.it
+Codice Destinatario SDI
+LV530WW
+Comune
+Empoli
+Provincia
+Firenze
+Regione
+Toscana
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "COMPUTER GROSS S.P.A."
+  });
+
+  assert.equal(company.financials.revenue.value, 1821753823);
+  assert.equal(company.financials.profit.value, 39409089);
+  assert.equal(company.financials.employees.value, 368);
+  assert.equal(company.city, "Empoli");
+});
+
+test("parses foreign subject with employee range and no public balance", () => {
+  const text = `
+CODING CONSULTANTS INTERNATIONAL INC.
+Attiva SOGGETTO ESTERO Venezia (VE) ATECO 46.51 dal 2002
+P.IVA 03659120962 REA VE-283130
+0-9 dipendenti
+Dipendenti
+Attività
+Commercio all'ingrosso di computer, apparecchiature informatiche periferiche e di software
+Natura Giuridica
+SOGGETTO ESTERO
+Data Iscrizione
+01/09/2002
+Comune
+Venezia
+Provincia
+Venezia
+Regione
+Veneto
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "CODING CONSULTANTS INTERNATIONAL INC."
+  });
+
+  assert.equal(company.vat, "03659120962");
+  assert.equal(company.legalForm, "SOGGETTO ESTERO");
+  assert.equal(company.financials.revenue, null);
+  assert.equal(company.financials.employees.display, "0-9");
+});
+
+
+test("parses the last three available balances", () => {
+  const text = `
+COMPUTER GROSS S.P.A.
+Attiva SOCIETA' PER AZIONI Empoli (FI) ATECO 46.50.1 dal 1997
+P.IVA 04801490485 REA FI-487781
+€ 1.821.753.823
+Fatturato 2025
+€ 39.409.089
+Utile 2025
+Ultimi 3 bilanci disponibili.
+Anno
+Fatturato
+Δ%
+Utile/Perdita
+Dipendenti
+Capitale
+2025
+€ 1.821.753.823
+-8,3%
+€ 39.409.089
+368
+€ 40.000.000
+2024
+€ 1.987.208.400
++8,0%
+€ 48.763.538
+—
+€ 40.000.000
+2023
+€ 1.839.857.066
+—
+€ 41.154.978
+—
+€ 40.000.000
+Appalti pubblici
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "COMPUTER GROSS S.P.A."
+  });
+
+  assert.equal(company.financials.balanceHistory.length, 3);
+  assert.deepEqual(
+    company.financials.balanceHistory.map((item) => item.year),
+    [2025, 2024, 2023]
+  );
+  assert.equal(company.financials.balanceHistory[0].revenue, 1821753823);
+  assert.equal(company.financials.balanceHistory[0].profit, 39409089);
+  assert.equal(company.financials.balanceHistory[0].employees, 368);
+  assert.equal(company.financials.balanceHistory[1].revenue, 1987208400);
+  assert.equal(company.financials.balanceHistory[2].profit, 41154978);
+});
+
+
+test("builds CompanyReports.it full legal-form slug for Poste Italiane", () => {
+  const slugs = buildSlugCandidates(
+    ["POSTE ITALIANE SPA"],
+    { provinceHints: ["RM"] }
+  );
+
+  assert.ok(slugs.includes("poste-italiane-societa-per-azioni"));
+  assert.ok(slugs.includes("poste-italiane-societa-per-azioni-RM"));
+});
+
+test("builds province-disambiguated slug for Rubino", () => {
+  const slugs = buildSlugCandidates(
+    ["RUBINO - S.R.L."],
+    { provinceHints: ["SA"] }
+  );
+
+  assert.ok(slugs.includes("rubino-s-r-l-SA"));
+  assert.ok(slugs.indexOf("rubino-s-r-l-SA") < 10);
+});
+
+
+test("does not misclassify an active company because FAQ contains cessata", () => {
+  const text = `
+RUBINO - S.R.L.
+Attiva SOCIETA' A RESPONSABILITA' LIMITATA Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016
+P.IVA 05488440651 REA SA-450078
+€ 2.277.793
+Fatturato 2024
+14
+Dipendenti
+Rubino - S.r.l. è un'impresa attiva o cessata?
+Rubino - S.r.l. risulta attualmente un'impresa attiva.
+Imprese Cessata
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "RUBINO - S.R.L."
+  });
+
+  assert.equal(company.status, "Attiva");
+});
+
+test("keeps a genuinely ceased status even if later text says active", () => {
+  const text = `
+AZIENDA CHIUSA SRL
+Cessata SOCIETA' A RESPONSABILITA' LIMITATA Roma (RM)
+P.IVA 12345678903 REA RM-123456
+Domande Frequenti
+La società era attiva negli anni precedenti.
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "AZIENDA CHIUSA SRL"
+  });
+
+  assert.equal(company.status, "Cessata");
+});
+
+test("parses thousands-separated employee counts", () => {
+  const text = `
+POSTE ITALIANE SPA
+Attiva SOCIETA' PER AZIONI Roma (RM) ATECO 53.1 dal 1997
+P.IVA 01114601006 REA RM-842633
+€ 10.503.829.486
+Fatturato 2024
+118.558
+Dipendenti
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "POSTE ITALIANE SPA"
+  });
+
+  assert.equal(company.financials.employees.value, 118558);
+  assert.equal(company.financials.employees.display, "118558");
+});
+
+
+test("finds active status even when DOM text is flattened", () => {
+  const text =
+    "RUBINO - S.R.L.Attiva SOCIETA' A RESPONSABILITA' LIMITATA " +
+    "Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016 " +
+    "P.IVA 05488440651 REA SA-450078 " +
+    "Rubino - S.r.l. è un'impresa attiva o cessata?";
+
+  assert.equal(inferCompanyStatus(text), "Attiva");
+});
+
+test("parses balance history from HTML table cell rows", () => {
+  const history = parseBalanceHistoryRows([
+    ["Anno", "Fatturato", "Δ%", "Utile/Perdita", "Dipendenti", "Capitale"],
+    ["2024", "€ 2.277.793", "+4,2%", "€ 111.548", "14", "€ 80.000"],
+    ["2023", "€ 2.185.586", "-6,1%", "€ 166.983", "—", "—"],
+    ["2022", "€ 2.328.756", "—", "€ 253.552", "14", "€ 80.000"]
+  ]);
+
+  assert.equal(history.length, 3);
+  assert.deepEqual(history.map((item) => item.year), [2024, 2023, 2022]);
+  assert.equal(history[0].revenue, 2277793);
+  assert.equal(history[0].profit, 111548);
+  assert.equal(history[0].employees, 14);
+  assert.equal(history[1].employees, null);
+});
+
+
+test("builds Italian subsidiary variants only for domain-context lookup", () => {
+  const normal = buildSlugCandidates(["Creditsafe"]);
+  const domainFallback = buildSlugCandidates(["Creditsafe"], {
+    includeItalianBrandVariants: true
+  });
+
+  assert.equal(normal.includes("creditsafe-italia-s-r-l"), false);
+  assert.ok(domainFallback.includes("creditsafe-italia-s-r-l"));
+  assert.ok(domainFallback.indexOf("creditsafe-italia-s-r-l") < 12);
+});
+
+
+test("normalizes noisy VIES legal names into canonical CompanyReports slug candidates", () => {
+  const variants = legalNameLookupVariants(
+    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  );
+  const slugs = buildSlugCandidates([
+    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  ]);
+
+  assert.ok(variants.includes("MPS MONITOR SRL"));
+  assert.ok(slugs.includes("mps-monitor-srl"));
+  assert.ok(slugs.indexOf("mps-monitor-srl") < 8);
+});
+
+test("keeps the original noisy legal name as a lookup candidate", () => {
+  const variants = legalNameLookupVariants("ACME SRL A SOCIO UNICO");
+
+  assert.ok(variants.includes("ACME SRL A SOCIO UNICO"));
+  assert.ok(variants.includes("ACME SRL"));
+});
+
+test("CompanyReports negative cache stores only durable 404 misses", () => {
+  assert.equal(shouldCacheCompanyReportsMiss(404), true);
+  assert.equal(shouldCacheCompanyReportsMiss(429), false);
+  assert.equal(shouldCacheCompanyReportsMiss(500), false);
+  assert.equal(shouldCacheCompanyReportsMiss(503), false);
+});
+
+
+test("keeps exact canonical CompanyReports slug first for normal legal names", () => {
+  const slugs = buildSlugCandidates(["FUTURE TECH SRL"]);
+
+  assert.equal(slugs[0], "future-tech-srl");
+});
+
+
+test("parses CompanyReports public company details by VAT", () => {
+  const text = `
+Partita IVA: 11511830967 - Codice Fiscale: 11511830967 - Ragione Sociale: ITALIA MANAGEMENT S.R.L.
+Italia Management S.r.l.
+Partita IVA
+11511830967
+Indirizzo
+Viale Abruzzi, 94 - Milano (MI)
+Fatturato
+€ 102.556 (2024) ACQUISTA BILANCIO
+Utile
+€ 2.530 (2024)
+Costo del personale
+€ 95 (2024)
+N. Dipendenti
+1
+Stato Attività
+Attiva
+Codice Fiscale
+11511830967
+Forma giuridica
+Societa' a responsabilita' limitata
+Codice Ateco
+70.22.09
+Attività prevalente
+Altre attivita' di consulenza imprenditoriale
+Fondazione
+24/12/2020
+CamCom
+MI
+REA
+2608329
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "Italia Management S.r.l. Fatturato",
+    url: "https://www.companyreports.it/11511830967"
+  });
+
+  assert.equal(company.provider, "CompanyReports.it");
+  assert.equal(company.name, "ITALIA MANAGEMENT S.R.L.");
+  assert.equal(company.vat, "11511830967");
+  assert.equal(company.taxCode, "11511830967");
+  assert.equal(company.address, "Viale Abruzzi, 94 - Milano (MI)");
+  assert.equal(company.financials.revenue.value, 102556);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 2530);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 95);
+  assert.equal(company.financials.personnelCost.year, 2024);
+  assert.equal(company.financials.employees.value, 1);
+  assert.equal(company.status, "Attiva");
+  assert.equal(company.legalForm, "Societa' a responsabilita' limitata");
+  assert.equal(company.ateco.code, "70.22.09");
+  assert.equal(company.registrationDate, "24/12/2020");
+  assert.equal(company.chamber, "MI");
+  assert.equal(company.rea, "MI-2608329");
+});
+
+test("parses CompanyReports alternate year labels and employee ranges", () => {
+  const text = `
+MEA S.R.L.
+Partita IVA
+01234567890
+Fatturato (2024)
+€ 4.456.517
+Risultato d'esercizio (2024)
+€ 57.122
+Costo del personale (2024)
+€ 3.485.797
+N. Dipendenti
+da 3 a 5
+Stato Attività
+Attiva
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "MEA S.R.L. Fatturato"
+  });
+
+  assert.equal(company.provider, "CompanyReports.it");
+  assert.equal(company.name, "MEA S.R.L.");
+  assert.equal(company.financials.revenue.value, 4456517);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 57122);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 3485797);
+  assert.equal(company.financials.employees.value, null);
+  assert.equal(company.financials.employees.display, "3-5");
+});
+
+
+test("parses CompanyReports labels with bare inline years", () => {
+  const text = `
+UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA
+Partita IVA
+16010961007
+Fatturato 2024
+€ 915.612 ACQUISTA BILANCIO
+Utile 2024
+€ 248.163
+Costo del personale 2024
+€ 198.587
+N. Dipendenti
+1
+Stato Attività
+Attiva
+`;
+
+  const company = parseCompanyReportsText(text, {
+    name: "UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA"
+  });
+
+  assert.equal(company.financials.revenue.value, 915612);
+  assert.equal(company.financials.revenue.year, 2024);
+  assert.equal(company.financials.profit.value, 248163);
+  assert.equal(company.financials.profit.year, 2024);
+  assert.equal(company.financials.personnelCost.value, 198587);
+  assert.equal(company.financials.personnelCost.year, 2024);
+});

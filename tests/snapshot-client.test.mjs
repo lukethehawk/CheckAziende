@@ -26,17 +26,30 @@ test("serializes only persisted fields when resolver result contains live promis
 
   await writeSnapshot("11295150152", {
     primary: { name: "Acme" },
-    backgroundXray: Promise.resolve({ provider: "Xray" })
+    companyReports: { name: "Acme", provider: "CompanyReports.it" },
+    aziende: { name: "Acme", provider: "Aziende.it" },
+    pendingUpdates: [{ provider: "xray", promise: Promise.resolve({ xray: { vat: "11295150152" } }) }]
   });
 
   assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0].result.primary, { name: "Acme" });
-  assert.equal(Object.hasOwn(messages[0].result, "backgroundXray"), false);
+  assert.deepEqual(messages[0].result.companyReports, {
+    name: "Acme",
+    provider: "CompanyReports.it"
+  });
+  assert.deepEqual(messages[0].result.aziende, {
+    name: "Acme",
+    provider: "Aziende.it"
+  });
+  assert.equal(Object.hasOwn(messages[0].result, "pendingUpdates"), false);
 });
 
 test("Chrome callback messaging returns cached snapshots without Promise API support", async () => {
   globalThis.browser = undefined;
-  const snapshot = { value: { primary: { name: "Acme" } }, age: 120, stale: false };
+  const snapshot = {
+    value: { primary: { name: "Acme" }, companyReports: { name: "Acme" } },
+    age: 120,
+    stale: false
+  };
   globalThis.chrome = {
     runtime: {
       sendMessage(message, respond) {

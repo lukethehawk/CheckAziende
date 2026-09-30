@@ -2,485 +2,483 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildSlugCandidates,
-  inferCompanyStatus,
-  legalNameLookupVariants,
-  parseAziendeText,
-  parseBalanceHistoryRows,
-  shouldCacheAziendeMiss,
-  slugifyCompanyName
+  extractAnnualRevenues,
+  findAziendeCompanyByVat,
+  isAziendeChallenge,
+  parseAziendeProfileText,
+  parseAziendeSearchResults,
+  parseItalianNumber,
+  parseSectorBenchmark,
+  shouldCacheAziendeMiss
 } from "../src/providers/aziende.js";
+import { htmlToText, loadFixture } from "./helpers/fixtures.mjs";
 
-test("slugifies Italian legal forms like Aziende.it URLs", () => {
-  assert.equal(
-    slugifyCompanyName("COMPUTER GROSS S.P.A."),
-    "computer-gross-s-p-a"
-  );
+const BASE_URL = "https://www.aziende.it";
+const VAT = "11941480961";
+const PROFILE_URL = `${BASE_URL}/mediane-italia-s-r-l-socio-unico`;
+const COOLDOWN_KEY = "aziende:v1:cooldown";
+const cacheKey = (vat) => `aziende:v1:vat:${vat}`;
+const searchUrl = (vat) => `${BASE_URL}/search?q=${vat}`;
 
-  assert.equal(
-    slugifyCompanyName("Future Tech SRL"),
-    "future-tech-srl"
-  );
-});
+function createStorage(initial = {}) {
+  const entries = { ...initial };
 
-test("builds legal-form variants for a brand-only name", () => {
-  const slugs = buildSlugCandidates(["MPS Monitor"]);
+  return {
+    entries,
+    async get(key) {
+      return Object.hasOwn(entries, key) ? { [key]: entries[key] } : {};
+    },
+    async set(patch) {
+      Object.assign(entries, patch);
+    }
+  };
+}
 
-  assert.ok(slugs.includes("mps-monitor"));
-  assert.ok(slugs.includes("mps-monitor-srl"));
-  assert.ok(slugs.includes("mps-monitor-s-p-a"));
-});
+function htmlResponse(body, { status = 200, url = "", contentType = "text/html; charset=utf-8" } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    url,
+    headers: {
+      get: (name) => (String(name).toLowerCase() === "content-type" ? contentType : null)
+    },
+    async text() {
+      return body;
+    }
+  };
+}
 
-test("parses Future Tech financial and registry data", () => {
-  const text = `
-FUTURE TECH SRL
-Attiva SOCIETA' A RESPONSABILITA' LIMITATA Basiglio (MI) ATECO 46.50.1 dal 1994
-P.IVA 11295150152 REA MI-1453877
-Sede legale: Residenze Acacie 601, 20079 Basiglio (MI)
-€ 1.992.222
-Fatturato 2024
-€ 236.014
-Utile 2024
-3
-Dipendenti
-€ 18.000
-Capitale sociale
-11,8%
-Margine netto
-Attività
-Commercio all'ingrosso di computer, unita' periferiche e software
-Ragione Sociale
-Future Tech Srl
-Natura Giuridica
-SOCIETA' A RESPONSABILITA' LIMITATA
-Partita IVA
-11295150152
-Data Iscrizione
-15/09/1994
-PEC
-amministrazione@pec.future-tech.it
-Codice Destinatario SDI
-T04ZHR3
-Comune
-Basiglio
-Provincia
-Milano
-Regione
-Lombardia
-`;
+// Installs fake fetch/storage and returns the recorded request URLs.
+function installEnvironment(t, handler, storage = createStorage()) {
+  const previousChrome = globalThis.chrome;
+  const previousFetch = globalThis.fetch;
+  const calls = [];
 
-  const company = parseAziendeText(text, {
-    name: "FUTURE TECH SRL",
-    url: "https://www.aziende.it/future-tech-srl"
+  t.after(() => {
+    if (previousChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = previousChrome;
+
+    if (previousFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = previousFetch;
   });
+
+  globalThis.chrome = { storage: { local: storage } };
+  globalThis.fetch = async (url, options) => {
+    calls.push(String(url));
+    return handler(String(url), options);
+  };
+
+  return calls;
+}
+
+test("parses Italian amounts written with dot and comma separators", () => {
+  assert.equal(parseItalianNumber("191.540"), 191540);
+  assert.equal(parseItalianNumber("1.234.567,89"), 1234567.89);
+  assert.equal(parseItalianNumber("1,090"), 1090);
+  assert.equal(parseItalianNumber("392.007 euro"), 392007);
+  assert.equal(parseItalianNumber("51,3"), 51.3);
+  assert.equal(parseItalianNumber("3.5"), 3.5);
+  assert.equal(parseItalianNumber(""), null);
+  assert.equal(parseItalianNumber("-77.983"), -77983);
+});
+
+test("reads the year-labelled annual revenue from the profile KPI", async () => {
+  const html = await loadFixture("aziende-profile.html");
+
+  assert.deepEqual(extractAnnualRevenues(htmlToText(html)), [
+    { year: 2024, revenue: 191540 }
+  ]);
+});
+
+test("parses the sector benchmark sentence", async () => {
+  const html = await loadFixture("aziende-profile.html");
+
+  assert.deepEqual(parseSectorBenchmark(htmlToText(html)), {
+    companyRevenue: 191540,
+    medianRevenue: 392007,
+    province: "TO",
+    sampleSize: 1090,
+    year: null
+  });
+});
+
+test("normalizes the observed sector comparison and ties it to the annual year", async () => {
+  const html = await loadFixture("aziende-profile.html");
+
+  const company = parseAziendeProfileText(htmlToText(html), {
+    name: "MEDIANE ITALIA S.R.L. SOCIO UNICO IN LIQUIDAZIONE",
+    title: "Mediane Italia S.r.l. Socio Unico In Liquidazione - P.IVA 11941480961",
+    url: PROFILE_URL
+  });
+
+  assert.equal(company.provider, "Aziende.it");
+  assert.equal(company.providerUrl, PROFILE_URL);
+  assert.equal(company.vat, VAT);
+  assert.equal(company.name, "MEDIANE ITALIA S.R.L. SOCIO UNICO IN LIQUIDAZIONE");
+  assert.deepEqual(company.sectorComparison, {
+    companyRevenue: 191540,
+    medianRevenue: 392007,
+    year: 2024,
+    province: "TO",
+    sampleSize: 1090,
+    differencePct: -51.14,
+    sourceName: "Aziende.it",
+    sourceUrl: PROFILE_URL
+  });
+});
+
+test("supports comma decimals, thousands dots and a median below the company", () => {
+  const text = [
+    "ACME S.R.L.",
+    "P.IVA 11295150152",
+    "€ 1.234.567,89",
+    "Fatturato 2024",
+    "Il fatturato di Acme S.r.l. (1.234.567,89 euro) è superiore alla mediana delle aziende dello stesso settore in provincia di MI (1.000.000,00 euro), calcolata su 2.500 imprese."
+  ].join("\n");
+
+  const company = parseAziendeProfileText(text, { url: `${BASE_URL}/acme-s-r-l` });
+
+  assert.equal(company.sectorComparison.companyRevenue, 1234567.89);
+  assert.equal(company.sectorComparison.medianRevenue, 1000000);
+  assert.equal(company.sectorComparison.sampleSize, 2500);
+  assert.equal(company.sectorComparison.year, 2024);
+  assert.equal(company.sectorComparison.differencePct, 23.46);
+});
+
+test("keeps the year null when the benchmark figure matches no year-labelled revenue", async () => {
+  const html = await loadFixture("aziende-profile-no-year.html");
+  const url = `${BASE_URL}/acme-servizi-s-r-l`;
+
+  const company = parseAziendeProfileText(htmlToText(html), { url });
 
   assert.equal(company.vat, "11295150152");
-  assert.equal(company.name, "FUTURE TECH SRL");
-  assert.equal(company.rea, "MI-1453877");
-  assert.equal(company.ateco.code, "46.50.1");
-  assert.equal(company.financials.revenue.value, 1992222);
-  assert.equal(company.financials.revenue.year, 2024);
-  assert.equal(company.financials.profit.value, 236014);
-  assert.equal(company.financials.employees.value, 3);
-  assert.equal(Math.round(company.financials.netMargin * 10) / 10, 11.8);
-  assert.equal(company.pec, "amministrazione@pec.future-tech.it");
-});
-
-test("parses a large company without corrupting year into revenue", () => {
-  const text = `
-COMPUTER GROSS S.P.A.
-Attiva SOCIETA' PER AZIONI Empoli (FI) ATECO 46.50.1 dal 1997
-P.IVA 04801490485 REA FI-487781
-Sede legale: Via Del Pino 1, 50053 Empoli (FI)
-€ 1.821.753.823
-Fatturato 2025
-€ 39.409.089
-Utile 2025
-368
-Dipendenti
-Ragione Sociale
-Computer Gross S.p.a.
-Natura Giuridica
-SOCIETA' PER AZIONI
-Data Iscrizione
-22/01/1997
-PEC
-computergross@pec.computergross.it
-Codice Destinatario SDI
-LV530WW
-Comune
-Empoli
-Provincia
-Firenze
-Regione
-Toscana
-`;
-
-  const company = parseAziendeText(text, {
-    name: "COMPUTER GROSS S.P.A."
+  assert.deepEqual(company.sectorComparison, {
+    companyRevenue: 640000,
+    medianRevenue: 800000,
+    year: null,
+    province: "MI",
+    sampleSize: null,
+    differencePct: null,
+    sourceName: "Aziende.it",
+    sourceUrl: url
   });
-
-  assert.equal(company.financials.revenue.value, 1821753823);
-  assert.equal(company.financials.profit.value, 39409089);
-  assert.equal(company.financials.employees.value, 368);
-  assert.equal(company.city, "Empoli");
 });
 
-test("parses foreign subject with employee range and no public balance", () => {
-  const text = `
-CODING CONSULTANTS INTERNATIONAL INC.
-Attiva SOGGETTO ESTERO Venezia (VE) ATECO 46.51 dal 2002
-P.IVA 03659120962 REA VE-283130
-0-9 dipendenti
-Dipendenti
-Attività
-Commercio all'ingrosso di computer, apparecchiature informatiche periferiche e di software
-Natura Giuridica
-SOGGETTO ESTERO
-Data Iscrizione
-01/09/2002
-Comune
-Venezia
-Provincia
-Venezia
-Regione
-Veneto
-`;
-
-  const company = parseAziendeText(text, {
-    name: "CODING CONSULTANTS INTERNATIONAL INC."
-  });
-
-  assert.equal(company.vat, "03659120962");
-  assert.equal(company.legalForm, "SOGGETTO ESTERO");
-  assert.equal(company.financials.revenue, null);
-  assert.equal(company.financials.employees.display, "0-9");
-});
-
-
-test("parses the last three available balances", () => {
-  const text = `
-COMPUTER GROSS S.P.A.
-Attiva SOCIETA' PER AZIONI Empoli (FI) ATECO 46.50.1 dal 1997
-P.IVA 04801490485 REA FI-487781
-€ 1.821.753.823
-Fatturato 2025
-€ 39.409.089
-Utile 2025
-Ultimi 3 bilanci disponibili.
-Anno
-Fatturato
-Δ%
-Utile/Perdita
-Dipendenti
-Capitale
-2025
-€ 1.821.753.823
--8,3%
-€ 39.409.089
-368
-€ 40.000.000
-2024
-€ 1.987.208.400
-+8,0%
-€ 48.763.538
-—
-€ 40.000.000
-2023
-€ 1.839.857.066
-—
-€ 41.154.978
-—
-€ 40.000.000
-Appalti pubblici
-`;
-
-  const company = parseAziendeText(text, {
-    name: "COMPUTER GROSS S.P.A."
-  });
-
-  assert.equal(company.financials.balanceHistory.length, 3);
-  assert.deepEqual(
-    company.financials.balanceHistory.map((item) => item.year),
-    [2025, 2024, 2023]
-  );
-  assert.equal(company.financials.balanceHistory[0].revenue, 1821753823);
-  assert.equal(company.financials.balanceHistory[0].profit, 39409089);
-  assert.equal(company.financials.balanceHistory[0].employees, 368);
-  assert.equal(company.financials.balanceHistory[1].revenue, 1987208400);
-  assert.equal(company.financials.balanceHistory[2].profit, 41154978);
-});
-
-
-test("builds Aziende.it full legal-form slug for Poste Italiane", () => {
-  const slugs = buildSlugCandidates(
-    ["POSTE ITALIANE SPA"],
-    { provinceHints: ["RM"] }
+test("returns a null sector comparison when the profile has no benchmark", () => {
+  const company = parseAziendeProfileText(
+    "ACME S.R.L.\nP.IVA 11295150152\n€ 100.000\nFatturato 2024",
+    { url: `${BASE_URL}/acme-s-r-l` }
   );
 
-  assert.ok(slugs.includes("poste-italiane-societa-per-azioni"));
-  assert.ok(slugs.includes("poste-italiane-societa-per-azioni-RM"));
+  assert.equal(company.vat, "11295150152");
+  assert.equal(company.sectorComparison, null);
 });
 
-test("builds province-disambiguated slug for Rubino", () => {
-  const slugs = buildSlugCandidates(
-    ["RUBINO - S.R.L."],
-    { provinceHints: ["SA"] }
+test("ignores pages without a VAT", () => {
+  assert.equal(parseAziendeProfileText("0 aziende trovate."), null);
+});
+
+test("reads same-origin profile candidates from the search page", async () => {
+  const html = await loadFixture("aziende-search.html");
+
+  assert.deepEqual(parseAziendeSearchResults(html), [PROFILE_URL]);
+});
+
+test("resolves a company by VAT through the public search", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+
+  const calls = installEnvironment(t, (url) => {
+    if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+    if (url === PROFILE_URL) return htmlResponse(profile, { url });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  const company = await findAziendeCompanyByVat(VAT, {
+    names: ["MEDIANE ITALIA S.R.L."]
+  });
+
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL]);
+  assert.equal(company.provider, "Aziende.it");
+  assert.equal(company.vat, VAT);
+  assert.equal(company.providerUrl, PROFILE_URL);
+  assert.equal(company.name, "MEDIANE ITALIA S.R.L. SOCIO UNICO IN LIQUIDAZIONE");
+  assert.equal(company.sectorComparison.province, "TO");
+  assert.equal(company.sectorComparison.sampleSize, 1090);
+  assert.equal(company.sectorComparison.year, 2024);
+  assert.equal(company.sectorComparison.differencePct, -51.14);
+});
+
+test("rejects a profile whose VAT does not match the requested one", async (t) => {
+  const target = "11295150152";
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+
+  const calls = installEnvironment(t, (url) => {
+    if (url === searchUrl(target)) return htmlResponse(search, { url });
+    if (url === PROFILE_URL) return htmlResponse(profile, { url });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  assert.equal(await findAziendeCompanyByVat(target), null);
+  assert.deepEqual(calls, [searchUrl(target), PROFILE_URL]);
+});
+
+test("stops on a 403 and serves the cached cooldown without retrying", async (t) => {
+  const blocked = await loadFixture("aziende-blocked.html");
+  const storage = createStorage();
+
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse(blocked, { status: 403, url: searchUrl(VAT) }),
+    storage
   );
 
-  assert.ok(slugs.includes("rubino-s-r-l-SA"));
-  assert.ok(slugs.indexOf("rubino-s-r-l-SA") < 10);
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+
+  assert.deepEqual(calls, [searchUrl(VAT)]);
+  assert.ok(storage.entries[COOLDOWN_KEY].value.until > Date.now());
+  assert.equal(storage.entries[cacheKey(VAT)], undefined);
 });
 
+test("stops on a 429 without retrying", async (t) => {
+  const storage = createStorage();
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse("Too many requests", { status: 429, url: searchUrl(VAT), contentType: "text/plain" }),
+    storage
+  );
 
-test("does not misclassify an active company because FAQ contains cessata", () => {
-  const text = `
-RUBINO - S.R.L.
-Attiva SOCIETA' A RESPONSABILITA' LIMITATA Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016
-P.IVA 05488440651 REA SA-450078
-€ 2.277.793
-Fatturato 2024
-14
-Dipendenti
-Rubino - S.r.l. è un'impresa attiva o cessata?
-Rubino - S.r.l. risulta attualmente un'impresa attiva.
-Imprese Cessata
-`;
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.deepEqual(calls, [searchUrl(VAT)]);
+  assert.ok(storage.entries[COOLDOWN_KEY]);
+});
 
-  const company = parseAziendeText(text, {
-    name: "RUBINO - S.R.L."
+test("treats a 200 challenge page as a block and cools down", async (t) => {
+  const blocked = await loadFixture("aziende-blocked.html");
+  const storage = createStorage();
+
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse(blocked, { status: 200, url: searchUrl(VAT) }),
+    storage
+  );
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.deepEqual(calls, [searchUrl(VAT)]);
+  assert.ok(storage.entries[COOLDOWN_KEY]);
+
+  assert.equal(isAziendeChallenge(200, blocked), true);
+  assert.equal(isAziendeChallenge(403, ""), true);
+  assert.equal(isAziendeChallenge(429, ""), true);
+  assert.equal(isAziendeChallenge(200, "<html><body>Risultati della ricerca</body></html>"), false);
+  assert.equal(isAziendeChallenge(404, "<html><body>Pagina non trovata</body></html>"), false);
+});
+
+test("deduplicates concurrent lookups for the same VAT", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+
+  const calls = installEnvironment(t, (url) => {
+    if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+    if (url === PROFILE_URL) return htmlResponse(profile, { url });
+    throw new Error(`unexpected request: ${url}`);
   });
 
-  assert.equal(company.status, "Attiva");
-});
-
-test("keeps a genuinely ceased status even if later text says active", () => {
-  const text = `
-AZIENDA CHIUSA SRL
-Cessata SOCIETA' A RESPONSABILITA' LIMITATA Roma (RM)
-P.IVA 12345678903 REA RM-123456
-Domande Frequenti
-La società era attiva negli anni precedenti.
-`;
-
-  const company = parseAziendeText(text, {
-    name: "AZIENDA CHIUSA SRL"
-  });
-
-  assert.equal(company.status, "Cessata");
-});
-
-test("parses thousands-separated employee counts", () => {
-  const text = `
-POSTE ITALIANE SPA
-Attiva SOCIETA' PER AZIONI Roma (RM) ATECO 53.1 dal 1997
-P.IVA 01114601006 REA RM-842633
-€ 10.503.829.486
-Fatturato 2024
-118.558
-Dipendenti
-`;
-
-  const company = parseAziendeText(text, {
-    name: "POSTE ITALIANE SPA"
-  });
-
-  assert.equal(company.financials.employees.value, 118558);
-  assert.equal(company.financials.employees.display, "118558");
-});
-
-
-test("finds active status even when DOM text is flattened", () => {
-  const text =
-    "RUBINO - S.R.L.Attiva SOCIETA' A RESPONSABILITA' LIMITATA " +
-    "Giffoni Valle Piana (SA) ATECO 46.49.9 dal 2016 " +
-    "P.IVA 05488440651 REA SA-450078 " +
-    "Rubino - S.r.l. è un'impresa attiva o cessata?";
-
-  assert.equal(inferCompanyStatus(text), "Attiva");
-});
-
-test("parses balance history from HTML table cell rows", () => {
-  const history = parseBalanceHistoryRows([
-    ["Anno", "Fatturato", "Δ%", "Utile/Perdita", "Dipendenti", "Capitale"],
-    ["2024", "€ 2.277.793", "+4,2%", "€ 111.548", "14", "€ 80.000"],
-    ["2023", "€ 2.185.586", "-6,1%", "€ 166.983", "—", "—"],
-    ["2022", "€ 2.328.756", "—", "€ 253.552", "14", "€ 80.000"]
+  const [first, second] = await Promise.all([
+    findAziendeCompanyByVat(VAT),
+    findAziendeCompanyByVat(VAT)
   ]);
 
-  assert.equal(history.length, 3);
-  assert.deepEqual(history.map((item) => item.year), [2024, 2023, 2022]);
-  assert.equal(history[0].revenue, 2277793);
-  assert.equal(history[0].profit, 111548);
-  assert.equal(history[0].employees, 14);
-  assert.equal(history[1].employees, null);
+  assert.equal(first, second);
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL]);
 });
 
+test("caches a positive result and reuses it without network", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+  const storage = createStorage();
 
-test("builds Italian subsidiary variants only for domain-context lookup", () => {
-  const normal = buildSlugCandidates(["Creditsafe"]);
-  const domainFallback = buildSlugCandidates(["Creditsafe"], {
-    includeItalianBrandVariants: true
+  const calls = installEnvironment(
+    t,
+    (url) => {
+      if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+      if (url === PROFILE_URL) return htmlResponse(profile, { url });
+      throw new Error(`unexpected request: ${url}`);
+    },
+    storage
+  );
+
+  const first = await findAziendeCompanyByVat(VAT);
+  const second = await findAziendeCompanyByVat(VAT);
+
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL]);
+  assert.equal(second.vat, VAT);
+  assert.deepEqual(second.sectorComparison, first.sectorComparison);
+});
+
+test("refreshes a positive result older than its TTL", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+  const stale = createStorage({
+    [cacheKey(VAT)]: {
+      cachedAt: Date.now() - 25 * 60 * 60 * 1000,
+      value: { provider: "Aziende.it", vat: VAT, sectorComparison: null }
+    }
   });
 
-  assert.equal(normal.includes("creditsafe-italia-s-r-l"), false);
-  assert.ok(domainFallback.includes("creditsafe-italia-s-r-l"));
-  assert.ok(domainFallback.indexOf("creditsafe-italia-s-r-l") < 12);
-});
-
-
-test("normalizes noisy VIES legal names into canonical Aziende slug candidates", () => {
-  const variants = legalNameLookupVariants(
-    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+  const calls = installEnvironment(
+    t,
+    (url) => {
+      if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+      if (url === PROFILE_URL) return htmlResponse(profile, { url });
+      throw new Error(`unexpected request: ${url}`);
+    },
+    stale
   );
-  const slugs = buildSlugCandidates([
-    "MPS MONITOR SRL A SOCIO UNICO !!S.R.L."
+
+  const company = await findAziendeCompanyByVat(VAT);
+
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL]);
+  assert.equal(company.sectorComparison.year, 2024);
+});
+
+test("stores an empty search as a short-lived miss", async (t) => {
+  const empty =
+    "<html><head><title>Risultati della ricerca</title></head><body><p><b>0</b> aziende trovate.</p></body></html>";
+  const storage = createStorage();
+
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse(empty, { url: searchUrl(VAT) }),
+    storage
+  );
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+
+  assert.deepEqual(calls, [searchUrl(VAT)]);
+  assert.equal(storage.entries[cacheKey(VAT)].value, null);
+});
+
+test("retries a miss once the short negative TTL expired", async (t) => {
+  const empty =
+    "<html><head><title>Risultati della ricerca</title></head><body><p><b>0</b> aziende trovate.</p></body></html>";
+  const storage = createStorage({
+    [cacheKey(VAT)]: {
+      cachedAt: Date.now() - 11 * 60 * 1000,
+      value: null
+    }
+  });
+
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse(empty, { url: searchUrl(VAT) }),
+    storage
+  );
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.deepEqual(calls, [searchUrl(VAT)]);
+});
+
+test("fetches at most three same-origin profile candidates", async (t) => {
+  const rows = [1, 2, 3, 4, 5]
+    .map((index) => `<tr><td><a class="rg-co" href="/societa-${index}-s-r-l">SOCIETA ${index} S.R.L.</a></td></tr>`)
+    .join("");
+  const search =
+    `<html><body><table class="rg-reg">${rows}` +
+    '<tr><td><a class="rg-co" href="https://evil.example/societa-x">X</a></td></tr>' +
+    '<tr><td><a class="rg-co" href="//other.example/societa-y">Y</a></td></tr>' +
+    "</table></body></html>";
+  const profile = await loadFixture("aziende-profile-no-year.html");
+
+  const calls = installEnvironment(t, (url) => {
+    if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+    return htmlResponse(profile, { url });
+  });
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+
+  const profileCalls = calls.filter((url) => url !== searchUrl(VAT));
+  assert.equal(profileCalls.length, 3);
+  assert.deepEqual(profileCalls, [
+    `${BASE_URL}/societa-1-s-r-l`,
+    `${BASE_URL}/societa-2-s-r-l`,
+    `${BASE_URL}/societa-3-s-r-l`
   ]);
-
-  assert.ok(variants.includes("MPS MONITOR SRL"));
-  assert.ok(slugs.includes("mps-monitor-srl"));
-  assert.ok(slugs.indexOf("mps-monitor-srl") < 8);
+  assert.ok(calls.every((url) => url.startsWith(BASE_URL)));
 });
 
-test("keeps the original noisy legal name as a lookup candidate", () => {
-  const variants = legalNameLookupVariants("ACME SRL A SOCIO UNICO");
+test("tolerates a missing options argument", async (t) => {
+  const calls = installEnvironment(
+    t,
+    () => htmlResponse("<html><body>404</body></html>", { status: 404, url: searchUrl(VAT) })
+  );
 
-  assert.ok(variants.includes("ACME SRL A SOCIO UNICO"));
-  assert.ok(variants.includes("ACME SRL"));
+  assert.equal(await findAziendeCompanyByVat(VAT, null), null);
+  assert.deepEqual(calls, [searchUrl(VAT)]);
 });
 
-test("Aziende negative cache stores only durable 404 misses", () => {
+test("never propagates network errors", async (t) => {
+  installEnvironment(t, () => {
+    throw new Error("offline");
+  });
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+});
+
+test("ignores invalid VATs without any request", async (t) => {
+  const calls = installEnvironment(t, () => {
+    throw new Error("unexpected request");
+  });
+
+  assert.equal(await findAziendeCompanyByVat("12345"), null);
+  assert.equal(await findAziendeCompanyByVat(""), null);
+  assert.equal(await findAziendeCompanyByVat(null), null);
+  assert.deepEqual(calls, []);
+});
+
+test("does not follow a search-result redirect to an untrusted host", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+  const storage = createStorage();
+  const calls = installEnvironment(t, (url, options) => {
+    if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+    if (options?.redirect === "follow") {
+      return htmlResponse(profile, { url: "https://untrusted.example/company" });
+    }
+    return htmlResponse("", { status: 302, url });
+  }, storage);
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL]);
+  assert.equal(storage.entries[cacheKey(VAT)], undefined);
+});
+
+test("does not cache a transient profile error as a missing company", async (t) => {
+  const search = await loadFixture("aziende-search.html");
+  const profile = await loadFixture("aziende-profile.html");
+  const storage = createStorage();
+  let profileCalls = 0;
+  const calls = installEnvironment(t, (url) => {
+    if (url === searchUrl(VAT)) return htmlResponse(search, { url });
+    profileCalls += 1;
+    return profileCalls === 1
+      ? htmlResponse("temporarily unavailable", { status: 503, url })
+      : htmlResponse(profile, { url });
+  }, storage);
+
+  assert.equal(await findAziendeCompanyByVat(VAT), null);
+  assert.equal(storage.entries[cacheKey(VAT)], undefined);
+  assert.equal((await findAziendeCompanyByVat(VAT))?.sectorComparison?.medianRevenue, 392007);
+  assert.deepEqual(calls, [searchUrl(VAT), PROFILE_URL, searchUrl(VAT), PROFILE_URL]);
+});
+
+test("stores only durable misses", () => {
   assert.equal(shouldCacheAziendeMiss(404), true);
+  assert.equal(shouldCacheAziendeMiss(410), true);
+  assert.equal(shouldCacheAziendeMiss(403), false);
   assert.equal(shouldCacheAziendeMiss(429), false);
   assert.equal(shouldCacheAziendeMiss(500), false);
-  assert.equal(shouldCacheAziendeMiss(503), false);
-});
-
-
-test("keeps exact canonical Aziende slug first for normal legal names", () => {
-  const slugs = buildSlugCandidates(["FUTURE TECH SRL"]);
-
-  assert.equal(slugs[0], "future-tech-srl");
-});
-
-
-test("parses CompanyReports public company details by VAT", () => {
-  const text = `
-Partita IVA: 11511830967 - Codice Fiscale: 11511830967 - Ragione Sociale: ITALIA MANAGEMENT S.R.L.
-Italia Management S.r.l.
-Partita IVA
-11511830967
-Indirizzo
-Viale Abruzzi, 94 - Milano (MI)
-Fatturato
-€ 102.556 (2024) ACQUISTA BILANCIO
-Utile
-€ 2.530 (2024)
-Costo del personale
-€ 95 (2024)
-N. Dipendenti
-1
-Stato Attività
-Attiva
-Codice Fiscale
-11511830967
-Forma giuridica
-Societa' a responsabilita' limitata
-Codice Ateco
-70.22.09
-Attività prevalente
-Altre attivita' di consulenza imprenditoriale
-Fondazione
-24/12/2020
-CamCom
-MI
-REA
-2608329
-`;
-
-  const company = parseAziendeText(text, {
-    name: "Italia Management S.r.l. Fatturato",
-    url: "https://www.companyreports.it/11511830967"
-  });
-
-  assert.equal(company.provider, "CompanyReports.it");
-  assert.equal(company.name, "ITALIA MANAGEMENT S.R.L.");
-  assert.equal(company.vat, "11511830967");
-  assert.equal(company.taxCode, "11511830967");
-  assert.equal(company.address, "Viale Abruzzi, 94 - Milano (MI)");
-  assert.equal(company.financials.revenue.value, 102556);
-  assert.equal(company.financials.revenue.year, 2024);
-  assert.equal(company.financials.profit.value, 2530);
-  assert.equal(company.financials.profit.year, 2024);
-  assert.equal(company.financials.personnelCost.value, 95);
-  assert.equal(company.financials.personnelCost.year, 2024);
-  assert.equal(company.financials.employees.value, 1);
-  assert.equal(company.status, "Attiva");
-  assert.equal(company.legalForm, "Societa' a responsabilita' limitata");
-  assert.equal(company.ateco.code, "70.22.09");
-  assert.equal(company.registrationDate, "24/12/2020");
-  assert.equal(company.chamber, "MI");
-  assert.equal(company.rea, "MI-2608329");
-});
-
-test("parses CompanyReports alternate year labels and employee ranges", () => {
-  const text = `
-MEA S.R.L.
-Partita IVA
-01234567890
-Fatturato (2024)
-€ 4.456.517
-Risultato d'esercizio (2024)
-€ 57.122
-Costo del personale (2024)
-€ 3.485.797
-N. Dipendenti
-da 3 a 5
-Stato Attività
-Attiva
-`;
-
-  const company = parseAziendeText(text, {
-    name: "MEA S.R.L. Fatturato"
-  });
-
-  assert.equal(company.provider, "CompanyReports.it");
-  assert.equal(company.name, "MEA S.R.L.");
-  assert.equal(company.financials.revenue.value, 4456517);
-  assert.equal(company.financials.revenue.year, 2024);
-  assert.equal(company.financials.profit.value, 57122);
-  assert.equal(company.financials.profit.year, 2024);
-  assert.equal(company.financials.personnelCost.value, 3485797);
-  assert.equal(company.financials.employees.value, null);
-  assert.equal(company.financials.employees.display, "3-5");
-});
-
-
-test("parses CompanyReports labels with bare inline years", () => {
-  const text = `
-UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA
-Partita IVA
-16010961007
-Fatturato 2024
-€ 915.612 ACQUISTA BILANCIO
-Utile 2024
-€ 248.163
-Costo del personale 2024
-€ 198.587
-N. Dipendenti
-1
-Stato Attività
-Attiva
-`;
-
-  const company = parseAziendeText(text, {
-    name: "UNICO SEARCH SOCIETA' A RESPONSABILITA' LIMITATA"
-  });
-
-  assert.equal(company.financials.revenue.value, 915612);
-  assert.equal(company.financials.revenue.year, 2024);
-  assert.equal(company.financials.profit.value, 248163);
-  assert.equal(company.financials.profit.year, 2024);
-  assert.equal(company.financials.personnelCost.value, 198587);
-  assert.equal(company.financials.personnelCost.year, 2024);
 });

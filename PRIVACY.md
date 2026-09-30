@@ -22,7 +22,8 @@ To retrieve and verify public company data, the extension may send only the info
 - European Commission VIES: VAT number validation;
 - CompanyReports.it: public company data lookup by VAT number;
 - RegistroAziende.it: public company lookup and verification;
-- Xray Finance: public financial-data enrichment.
+- Xray Finance: public financial-data enrichment;
+- Aziende.it: public sector-revenue median lookup by VAT number, only after a company has been identified.
 
 Depending on the lookup, transmitted lookup values may include a VAT number, company name, city/province hints or equivalent identifiers derived from the active website.
 
@@ -39,7 +40,8 @@ Current cache durations are generally:
 - CompanyReports.it: up to 12 hours;
 - VIES: up to 24 hours;
 - RegistroAziende.it: up to 24 hours;
-- Xray Finance: up to 24 hours.
+- Xray Finance: up to 24 hours;
+- Aziende.it: successful results up to 24 hours; misses and rate-limit/challenge responses use shorter local cooldowns.
 
 The extension does not use its own remote backend or cloud database.
 
@@ -61,7 +63,7 @@ The stable release allows manual lookup by VAT number. The entered VAT number is
 
 ## Third-party services
 
-CheckAziende is not affiliated with, endorsed by, or sponsored by VIES, CompanyReports.it, RegistroAziende.it or Xray Finance.
+CheckAziende is not affiliated with, endorsed by, or sponsored by VIES, CompanyReports.it, RegistroAziende.it, Xray Finance or Aziende.it.
 
 Availability and data returned by those services may change independently of CheckAziende.
 
