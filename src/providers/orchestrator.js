@@ -6,6 +6,7 @@ import {
 } from "./xray.js";
 import { findRegistroAziendeCompanyByVat } from "./registroaziende.js";
 import { readSnapshot, writeSnapshot } from "./snapshot-client.js";
+import { hasAziendePermission } from "../permissions.js";
 const PRIMARY_BUDGET_MS = 1600;
 const XRAY_BUDGET_MS = 900;
 const FALLBACK_BUDGET_MS = 550;
@@ -391,11 +392,34 @@ function xrayCanonicalAddsCandidates(names, canonicalName) {
     canonical.slice(0, 3).some((slug) => !numbered.has(slug));
 }
 
+// Every Aziende channel rechecks the host immediately before invoking the
+// provider: the initial permission flag may be stale after canonical lookups.
+function aziendePendingUpdate(vat, names, { provinceHints = [], cityHints = [] } = {}) {
+  return {
+    provider: "aziende",
+    promise: hasAziendePermission().then((granted) => granted
+      ? findAziendeCompanyByVat(vat, { names, provinceHints, cityHints })
+      : null)
+      .catch(() => null)
+      .then(async (azienda) => {
+        if (!azienda) return null;
+
+        // Only merge the new slot: other providers may have completed after
+        // the first render and already updated their snapshot fields.
+        await writeSnapshot(vat, { aziende: azienda });
+
+        return { aziende: azienda };
+      })
+      .catch(() => null)
+  };
+}
+
 async function resolveNetwork({
   vat,
   names = [],
   provinceHints = [],
-  cityHints = []
+  cityHints = [],
+  aziendeAllowed = false
 }) {
   // CompanyReports.it is the canonical record and leads the critical path.
   const companyReportsPromise = findCompanyReportsCompanyByVat(vat, {
@@ -623,28 +647,17 @@ async function resolveNetwork({
   }
 
   // Aziende.it sector comparison is optional enrichment. It starts only after
-  // the fast result is ready, so it can never delay the first render, persists
-  // on arrival and hands the popup a patch that cannot touch the canonical
-  // primary.
-  pendingUpdates.push({
-    provider: "aziende",
-    promise: findAziendeCompanyByVat(vat, {
-      names: [companyReportsFast?.name, ...names].filter(Boolean),
-      provinceHints,
-      cityHints
-    })
-      .catch(() => null)
-      .then(async (azienda) => {
-        if (!azienda) return null;
-
-        // Only merge the new slot: other providers may have completed after
-        // the first render and already updated their snapshot fields.
-        await writeSnapshot(vat, { aziende: azienda });
-
-        return { aziende: azienda };
-      })
-      .catch(() => null)
-  });
+  // the fast result is ready and only when the exact Aziende.it host permission
+  // is granted: without it the provider is never reached, cache included.
+  if (aziendeAllowed) {
+    pendingUpdates.push(
+      aziendePendingUpdate(
+        vat,
+        [companyReportsFast?.name, ...names].filter(Boolean),
+        { provinceHints, cityHints }
+      )
+    );
+  }
 
   const result = {
     primary,
@@ -662,6 +675,10 @@ async function resolveNetwork({
 
 export async function resolveCompanyProviders(args) {
   const vat = String(args?.vat || "").replace(/\D/g, "");
+  // Deny by default: only an explicit, permission-checked `true` reaches
+  // Aziende.it. Both the fresh network path and the cached refresh plan read
+  // this single flag.
+  const aziendeAllowed = args?.aziendeAllowed === true;
   const cached = await readSnapshot(vat);
 
   if (cached?.value) {
@@ -765,22 +782,13 @@ export async function resolveCompanyProviders(args) {
       });
     }
 
-    if (plan.aziende) {
-      pendingUpdates.push({
-        provider: "aziende",
-        promise: findAziendeCompanyByVat(vat, {
-          names,
-          provinceHints,
-          cityHints
-        })
-          .then(async (azienda) => {
-            if (!azienda) return null;
-
-            await writeSnapshot(vat, { aziende: azienda });
-            return { aziende: azienda };
-          })
-          .catch(() => null)
-      });
+    // The plan may still list the Aziende.it slot, but the provider is only
+    // reached when the optional host permission is granted. The cached
+    // snapshot is served unchanged either way.
+    if (plan.aziende && aziendeAllowed) {
+      pendingUpdates.push(
+        aziendePendingUpdate(vat, names, { provinceHints, cityHints })
+      );
     }
 
     return {
@@ -797,4 +805,26 @@ export async function resolveCompanyProviders(args) {
     fromCache: false,
     stale: false
   };
+}
+
+// Targeted Aziende.it-only refresh, used when the user grants the optional host
+// permission while a company is already displayed: it reuses the same
+// enrichment channel (snapshot persistence included) without reopening or
+// rerunning the canonical lookup. `aziendeAllowed` is required so an
+// unpermissioned caller can never start the provider.
+export function resolveAziendeEnrichment({
+  vat,
+  names = [],
+  provinceHints = [],
+  cityHints = [],
+  aziendeAllowed = false
+} = {}) {
+  const targetVat = String(vat || "").replace(/\D/g, "");
+
+  const pendingUpdates =
+    aziendeAllowed && targetVat
+      ? [aziendePendingUpdate(targetVat, names, { provinceHints, cityHints })]
+      : [];
+
+  return { pendingUpdates };
 }

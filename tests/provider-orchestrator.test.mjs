@@ -345,6 +345,7 @@ const snapshotStore = createSnapshotStore(extensionStorage);
 const network = createNetwork();
 
 globalThis.chrome = {
+  permissions: { contains: (_details, callback) => callback(true) },
   runtime: {
     sendMessage(message, callback) {
       Promise.resolve()
@@ -379,6 +380,7 @@ const {
   needsFallback,
   previousBalanceRows,
   promoteLatestFinancialYear,
+  resolveAziendeEnrichment,
   resolveCompanyProviders,
   selectCanonicalPrimary
 } = await import("../src/providers/orchestrator.js");
@@ -985,7 +987,7 @@ test("late CompanyReports.it publishes its patch before a delayed RegistroAziend
     network.route(xrayUrl, () => htmlResponse(FIXTURES.xray, { url: xrayUrl }));
     network.route(AZIENDE_SEARCH_URL, () => aziendeSearch.promise);
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1082,7 +1084,7 @@ test("late RegistroAziende publishes first without ever downgrading the canonica
     network.route(registroUrl, () => registro.promise);
     network.route(xrayUrl, () => htmlResponse(FIXTURES.xray, { url: xrayUrl }));
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1164,7 +1166,7 @@ test("a late Xray retry resolves independently of the canonical patch", async ()
     );
     network.route(retryUrl, () => retryXray.promise);
 
-    const pending = resolveCompanyProviders({ vat: VAT, names });
+    const pending = resolveCompanyProviders({ vat: VAT, names, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1231,7 +1233,7 @@ test("late canonical name retries Xray while speculative search remains pending"
       htmlResponse(FIXTURES.xray, { url: canonicalUrl })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names });
+    const pending = resolveCompanyProviders({ vat: VAT, names, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
     assert.equal(first.xray, null);
@@ -1276,7 +1278,7 @@ test("Aziende enrichment is requested only after the first render and never dela
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.settle();
 
     // Inside the fast budget: the canonical providers were requested, the
@@ -1334,8 +1336,8 @@ test("concurrent resolutions share a single in-flight Aziende lookup per VAT", a
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const firstPending = resolveCompanyProviders({ vat: VAT, names: NAMES });
-    const secondPending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const firstPending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
+    const secondPending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
 
     await clock.advance(2600);
     const [first, second] = await Promise.all([firstPending, secondPending]);
@@ -1386,7 +1388,7 @@ test("reuses the in-flight name-based RegistroAziende lookup without a second re
     );
     network.route(xrayUrl, () => htmlResponse(FIXTURES.xray, { url: xrayUrl }));
 
-    const pending = resolveCompanyProviders({ vat: VAT, names });
+    const pending = resolveCompanyProviders({ vat: VAT, names, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1445,7 +1447,7 @@ test("a failing optional late provider never blocks the others nor rejects", asy
     network.route(registroUrl, () => registro.promise);
     network.route(xrayUrl, () => htmlResponse(FIXTURES.xray, { url: xrayUrl }));
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1488,7 +1490,7 @@ test("a failing verifier still publishes the canonical record", async (t) => {
     );
     network.route(xrayUrl, () => htmlResponse(FIXTURES.xray, { url: xrayUrl }));
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1534,7 +1536,7 @@ test("a snapshot completed by progressive patches resolves from cache without ne
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1564,7 +1566,7 @@ test("a snapshot completed by progressive patches resolves from cache without ne
 
     network.calls.length = 0;
 
-    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
 
     assert.equal(cached.fromCache, true);
     assert.equal(cached.stale, false);
@@ -1621,7 +1623,7 @@ test("a fresh cached CompanyReports plus RegistroAziende snapshot refreshes only
       network.route(url, () => htmlResponse(FIXTURES.registro, { url }));
     }
 
-    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
 
     assert.equal(cached.fromCache, true);
     assert.equal(cached.stale, false);
@@ -1685,7 +1687,7 @@ test("an Xray lookup that outlives its budget still publishes a progressive patc
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
 
@@ -1830,7 +1832,7 @@ test("a covered canonical Xray name does not start a second slug search", async 
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
     await clock.settle();
@@ -1869,7 +1871,7 @@ test("a canonical Xray name probes numbered slugs beyond the speculative search 
       htmlResponse(FIXTURES.xray, { url })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names });
+    const pending = resolveCompanyProviders({ vat: VAT, names, aziendeAllowed: true });
     await clock.advance(2600);
     const first = await pending;
     const lateXray = await Promise.all(
@@ -1927,7 +1929,7 @@ test("a stale snapshot exposes a single nested refresh pending update", async ()
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
 
     assert.equal(cached.fromCache, true);
     assert.equal(cached.stale, true);
@@ -1994,7 +1996,7 @@ test("an uncached lookup keeps the completion indicator alive until the late Xra
       htmlResponse(FIXTURES.aziendeProfile, { url: AZIENDE_PROFILE_URL })
     );
 
-    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
     await clock.advance(2600);
     const resolved = await pending;
 
@@ -2098,7 +2100,7 @@ test("a fresh cached snapshot without Xray keeps the indicator alive until the X
       network.route(url, () => htmlResponse(FIXTURES.registro, { url }));
     }
 
-    const resolved = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    const resolved = await resolveCompanyProviders({ vat: VAT, names: NAMES, aziendeAllowed: true });
 
     assert.equal(resolved.fromCache, true);
     assert.equal(resolved.companyReports.provider, "CompanyReports.it");
@@ -2165,5 +2167,301 @@ test("a fresh cached snapshot without Xray keeps the indicator alive until the X
     );
   } finally {
     clock.restore();
+  }
+});
+
+/* ---------------------------------------------------------------------------
+ * Aziende.it optional host permission
+ *
+ * The provider is optional: without the exact Aziende.it host permission
+ * neither its network lookup nor its cache may be touched, while every other
+ * provider and both snapshot paths keep working normally.
+ * ------------------------------------------------------------------------- */
+
+function seedSnapshot(value, { cachedAt = Date.now() } = {}) {
+  extensionStorage.entries[`provider-orchestrator:v9:${VAT}`] = {
+    schemaVersion: 2,
+    cachedAt,
+    value
+  };
+}
+
+test("the Aziende.it provider is never reached when the permission is missing", async () => {
+  const clock = startClock();
+
+  try {
+    network.reset();
+    extensionStorage.clear();
+    installFixtureProviders({ names: NAMES });
+
+    // No `aziendeAllowed` flag at all: the gate is deny-by-default.
+    const pending = resolveCompanyProviders({ vat: VAT, names: NAMES });
+    await clock.advance(2600);
+    const first = await pending;
+    await clock.settle();
+
+    // Canonical providers and the optional Xray enrichment work normally.
+    assert.equal(first.companyReports.provider, "CompanyReports.it");
+    assert.equal(first.xray?.vat, VAT);
+
+    let registro = first.registro;
+    if (!registro) {
+      registro = (await pendingPromiseFor(first, "registro"))?.registro || null;
+    }
+    assert.equal(registro?.provider, "RegistroAziende.it");
+
+    // The optional provider is absent and was never requested.
+    assert.equal(first.aziende, null);
+    assert.deepEqual(pendingUpdatesFor(first, "aziende"), []);
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.aziende))
+        .length,
+      0
+    );
+
+    const snapshot = await snapshotStore.read(VAT);
+    assert.equal(snapshot.value.companyReports.provider, "CompanyReports.it");
+    assert.equal(snapshot.value.aziende, null);
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a fresh cached snapshot without Aziende starts no lookup without permission", async () => {
+  const clock = startClock();
+
+  try {
+    network.reset();
+    extensionStorage.clear();
+
+    const canonical = {
+      provider: "CompanyReports.it",
+      vat: VAT,
+      name: "RUBINO - S.R.L."
+    };
+
+    seedSnapshot({
+      primary: canonical,
+      companyReports: canonical,
+      aziende: null,
+      xray: { provider: "Xray Finance", vat: VAT },
+      registro: {
+        provider: "RegistroAziende.it",
+        vat: VAT,
+        name: "RUBINO - S.R.L."
+      },
+      verification: null
+    });
+
+    // Every provider is routed, so a stray Aziende.it request would be visible.
+    installFixtureProviders({ names: NAMES });
+
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    await clock.settle();
+
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.stale, false);
+    assert.equal(cached.companyReports.provider, "CompanyReports.it");
+    assert.deepEqual(cached.pendingUpdates, []);
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.aziende))
+        .length,
+      0
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a cached Aziende.it slot is served unchanged without permission", async () => {
+  const clock = startClock();
+
+  try {
+    network.reset();
+    extensionStorage.clear();
+
+    const canonical = {
+      provider: "CompanyReports.it",
+      vat: VAT,
+      name: "RUBINO - S.R.L."
+    };
+    const azienda = {
+      provider: "Aziende.it",
+      vat: VAT,
+      sectorComparison: {
+        sourceName: "Aziende.it",
+        companyRevenue: 191_540,
+        medianRevenue: 392_007,
+        year: 2024
+      }
+    };
+
+    seedSnapshot({
+      primary: canonical,
+      companyReports: canonical,
+      aziende: azienda,
+      xray: { provider: "Xray Finance", vat: VAT },
+      registro: {
+        provider: "RegistroAziende.it",
+        vat: VAT,
+        name: "RUBINO - S.R.L."
+      },
+      verification: null
+    });
+
+    installFixtureProviders({ names: NAMES });
+
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+    await clock.settle();
+
+    // The popup still receives the cached comparison (and hides it while the
+    // permission is missing); nothing is refreshed or deleted.
+    assert.equal(cached.aziende.provider, "Aziende.it");
+    assert.deepEqual(cached.pendingUpdates, []);
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.aziende))
+        .length,
+      0
+    );
+
+    const snapshot = await snapshotStore.read(VAT);
+    assert.equal(snapshot.value.aziende.provider, "Aziende.it");
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a stale refresh keeps canonical providers and never touches Aziende.it without permission", async () => {
+  const clock = startClock();
+
+  try {
+    network.reset();
+    extensionStorage.clear();
+
+    const canonical = {
+      provider: "CompanyReports.it",
+      vat: VAT,
+      name: "RUBINO - S.R.L."
+    };
+
+    seedSnapshot(
+      {
+        primary: canonical,
+        companyReports: canonical,
+        aziende: null,
+        xray: null,
+        registro: null,
+        verification: null
+      },
+      { cachedAt: Date.now() - 2 * 24 * 60 * 60 * 1000 }
+    );
+
+    installFixtureProviders({ names: NAMES });
+
+    const cached = await resolveCompanyProviders({ vat: VAT, names: NAMES });
+
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.stale, true);
+    assert.deepEqual(
+      cached.pendingUpdates.map((entry) => entry.provider),
+      ["refresh"]
+    );
+
+    await clock.advance(2600);
+    const fresh = await cached.pendingUpdates[0].promise;
+    await clock.settle();
+
+    assert.equal(fresh.companyReports.provider, "CompanyReports.it");
+    assert.deepEqual(pendingUpdatesFor(fresh, "aziende"), []);
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.aziende))
+        .length,
+      0
+    );
+    assert.ok(
+      network.calls.some((url) => url.startsWith(PROVIDER_HOSTS.companyReports))
+    );
+    assert.ok(
+      network.calls.some((url) => url.startsWith(PROVIDER_HOSTS.xray))
+    );
+
+    const snapshot = await snapshotStore.read(VAT);
+    assert.equal(snapshot.stale, false);
+    assert.equal(snapshot.value.companyReports.provider, "CompanyReports.it");
+    assert.equal(snapshot.value.aziende, null);
+  } finally {
+    clock.restore();
+  }
+});
+
+test("the grant-time Aziende refresh is permission-gated and persists its own slot", async () => {
+  const clock = startClock();
+
+  try {
+    network.reset();
+    extensionStorage.clear();
+
+    // An explicitly denied refresh never reaches the provider.
+    const denied = resolveAziendeEnrichment({
+      vat: VAT,
+      names: NAMES,
+      aziendeAllowed: false
+    });
+    assert.deepEqual(denied.pendingUpdates, []);
+    assert.equal(network.calls.length, 0);
+
+    installFixtureProviders({ names: NAMES });
+
+    const granted = resolveAziendeEnrichment({
+      vat: VAT,
+      names: NAMES,
+      aziendeAllowed: true
+    });
+
+    assert.equal(granted.pendingUpdates.length, 1);
+    assert.equal(granted.pendingUpdates[0].provider, "aziende");
+
+    const patch = await granted.pendingUpdates[0].promise;
+    await clock.settle();
+
+    assert.equal(patch.aziende.provider, "Aziende.it");
+    assert.equal(patch.aziende.vat, VAT);
+
+    const snapshot = await snapshotStore.read(VAT);
+    assert.equal(snapshot.value.aziende.provider, "Aziende.it");
+
+    // The targeted refresh never reruns the canonical providers.
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.companyReports))
+        .length,
+      0
+    );
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.registro))
+        .length,
+      0
+    );
+    assert.equal(
+      network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.xray)).length,
+      0
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a revoked host permission blocks Aziende despite a previously granted resolver flag", async () => {
+  network.reset();
+  extensionStorage.clear();
+  installFixtureProviders({ names: NAMES });
+  globalThis.chrome.permissions.contains = (_details, callback) => callback(false);
+  try {
+    const result = resolveAziendeEnrichment({ vat: VAT, names: NAMES, aziendeAllowed: true });
+    const patch = await result.pendingUpdates[0].promise;
+    assert.equal(patch, null);
+    assert.equal(network.calls.filter((url) => url.startsWith(PROVIDER_HOSTS.aziende)).length, 0);
+    assert.equal(await snapshotStore.read(VAT), null);
+  } finally {
+    globalThis.chrome.permissions.contains = (_details, callback) => callback(true);
   }
 });
