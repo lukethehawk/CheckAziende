@@ -28,11 +28,12 @@ export async function writeSnapshot(vat, result) {
   try {
     // Resolver results also carry live enrichment Promises, which cannot cross
     // the runtime messaging boundary. Only the persisted fields belong here.
-    const { primary, aziende, xray, registro, verification } = result;
+    const { primary, companyReports, aziende, xray, registro, verification } =
+      result;
     await sendSnapshotMessage({
       type: "providerSnapshot.write",
       vat,
-      result: { primary, aziende, xray, registro, verification }
+      result: { primary, companyReports, aziende, xray, registro, verification }
     });
   } catch {
     // Snapshot cache is optional.

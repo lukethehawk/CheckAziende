@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://ec.europa.eu/*",
     "https://www.companyreports.it/*",
+    "https://www.aziende.it/*",
     "https://xrayfinance.it/*",
     "https://registroaziende.it/*"
   ],

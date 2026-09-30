@@ -98,6 +98,7 @@ src/
   scanner.js
   providers/
     vies.js
+    companyreports.js
     aziende.js
     xray.js
     registroaziende.js
@@ -112,17 +113,18 @@ tests/
 
 ## Provider societari
 
-L'architettura corrente usa tre fonti con ruoli separati:
+L’architettura corrente usa quattro fonti con ruoli separati:
 
 - **CompanyReports.it** è il provider canonico per anagrafica e dati economici pubblici quando la P.IVA è nota;
 - **RegistroAziende.it** è il fallback/verificatore e può completare campi mancanti e storico dei bilanci;
-- **Xray Finance** è un provider di arricchimento finanziario, in particolare per EBITDA ed EBITDA margin.
+- **Xray Finance** è un provider di arricchimento finanziario, in particolare per EBITDA ed EBITDA margin;
+- **Aziende.it** aggiunge soltanto una mediana di fatturato settoriale verificata sulla P.IVA.
 
 Il provider CompanyReports usa direttamente la P.IVA nella URL pubblica e accetta la scheda solo se la P.IVA estratta coincide con quella richiesta. Normalizza i campi pubblici disponibili mantenendo invariata l'interfaccia usata dall'orchestratore.
 
-Per compatibilità interna il modulo primario conserva ancora il nome storico `src/providers/aziende.js`; il nome del file non indica più la fonte utilizzata.
+`src/providers/companyreports.js` resta il provider primario; `src/providers/aziende.js` contiene solo il confronto di settore.
 
-L'accesso cross-origin è limitato a VIES e ai tre provider configurati nel `manifest.json`.
+L’accesso cross-origin è limitato a VIES e ai quattro provider configurati nel `manifest.json`.
 
 ## Prossimi passi
 
@@ -160,12 +162,15 @@ La versione 0.6.0 introduce un orchestratore dei provider con priorità alla vel
 - CompanyReports.it e Xray Finance vengono interrogati in parallelo con un budget breve;
 - RegistroAziende.it viene usato come fallback bloccante solo se il provider primario è incompleto;
 - quando i dati principali sono già disponibili, RegistroAziende.it viene usato in background come verifica incrociata e non ritarda il primo render;
+- i risultati tardivi di CompanyReports.it, RegistroAziende.it, Xray Finance e Aziende.it aggiornano la scheda già aperta non appena ciascuna fonte termina, senza attendere le altre; CompanyReports.it conserva la priorità canonica e ogni aggiornamento valido viene fuso nello snapshot;
 - i risultati completi vengono memorizzati localmente per 24 ore e possono essere riutilizzati fino a 7 giorni con aggiornamento in background (stale-while-revalidate);
 - eventuali conflitti su stato, fatturato o utile vengono registrati nella struttura di verifica per il futuro score di affidabilità dei dati.
 
 RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
 
 La cache aggregata `provider-orchestrator:v9:<P.IVA>` è gestita dal background MV3 tramite messaggi runtime: `src/background/provider-snapshot.js` legge e fonde gli snapshot in `storage.local`, serializzando le scritture per P.IVA. `src/providers/snapshot-client.js` è il confine usato dall’orchestratore; errori del background equivalgono a una cache non disponibile. Ricerche e parsing dei provider, Promise di arricchimento, stale-while-revalidate e rendering rimangono nel popup. Il build usa uno script background Firefox e un service worker modulo nei browser Chromium.
+
+Il resolver restituisce il primo risultato insieme a `pendingUpdates` (`provider`, `promise`): ogni risultato tardivo valido viene sia scritto nello snapshot sia applicato alla scheda aperta. La stessa regola vale per i provider mancanti in uno snapshot ancora fresco e per gli aggiornamenti annidati di uno snapshot stale. Il popup conta le operazioni fino all’applicazione del relativo aggiornamento, non soltanto fino alla risposta HTTP. Xray condivide le richieste in corso allo stesso URL e non ripete la ricerca sul nome canonico se non introduce nuovi slug: una risposta transitoria HTTP 503 non viene memorizzata come assenza definitiva.
 
 ReportAziende resta una possibile fonte futura tramite API autenticata. CompanyReports.it è invece ora integrato nel fast path tramite la scheda pubblica per P.IVA.
 
@@ -194,7 +199,7 @@ La normalizzazione della società e l'arricchimento fra provider canonico, Regis
 
 ## UI 0.7.3
 
-Quando una scheda azienda è già visibile ma uno o più provider stanno ancora completando i dati, compare in alto una piccola riga `Completamento dati in corso…`. L'indicatore appare solo se il caricamento in background dura più di circa 350 ms e scompare automaticamente quando le richieste pendenti terminano. La logica di identificazione, merge e priorità dei provider non viene modificata.
+Quando una scheda azienda è già visibile ma uno o più provider stanno ancora completando i dati, compare in alto una piccola riga `Completamento dati in corso…`. L’indicatore appare solo se il caricamento in background dura più di circa 350 ms dopo il primo render e scompare quando tutte le richieste pertinenti terminano, anche in caso di errore. Una ricerca successiva non può applicare i risultati della precedente.
 
 
 ## Fix Xray 0.7.4
@@ -443,3 +448,9 @@ La versione stabile include invece tutte le correzioni consolidate su:
 - reset corretto dei dati finanziari quando si cambia azienda manualmente.
 
 Lo sviluppo della ricerca per ragione sociale continua separatamente nel branch beta e potrà rientrare nella release stabile solo dopo test sufficienti sui casi reali.
+
+## Confronto di settore (Task 2)
+
+Aziende.it è una fonte distinta dal provider canonico CompanyReports.it. Dopo il primo render, una ricerca pubblica per P.IVA può aggiungere il fatturato dell’azienda e la mediana del settore provinciale: il profilo Aziende.it viene accettato solo se la P.IVA coincide esattamente. Quando i dati mancano o il sito limita le richieste, la sezione resta nascosta e l’identità e i dati finanziari principali non cambiano. La differenza percentuale è mostrata solo se il fatturato e la mediana sono confrontabili nello stesso contesto temporale.
+
+La ricerca Aziende.it è opzionale e non ritarda la scheda. Le risposte valide e gli esiti negativi sono memorizzati localmente con durate diverse; `429` e pagine di challenge attivano un breve cooldown senza retry aggressivi. La cache aggregata mantiene la chiave `provider-orchestrator:v9:<P.IVA>` e i TTL di 24 ore / 7 giorni: uno schema esplicito separa `companyReports` (canonico) da `aziende` (confronto). Gli snapshot legacy senza marker vengono interpretati come CompanyReports senza riscriverne il timestamp al primo accesso.

@@ -269,6 +269,18 @@ h2 {
   line-height: 1.45;
 }
 
+.sector-comparison {
+  padding: 11px 12px;
+  border: 1px solid #e7e9ee;
+  border-radius: 9px;
+}
+
+.sector-difference {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .company-data {
   overflow: hidden;
   border-top: 1px solid #eceef2;

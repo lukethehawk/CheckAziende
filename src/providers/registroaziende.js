@@ -1,4 +1,4 @@
-import { slugifyCompanyName } from "./aziende.js";
+import { slugifyCompanyName } from "./companyreports.js";
 
 const BASE_URL = "https://registroaziende.it/azienda";
 const SEARCH_URL = "https://registroaziende.it/ricerca";

@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  parseAziendeText
-} from "../src/providers/aziende.js";
+  parseCompanyReportsText
+} from "../src/providers/companyreports.js";
 import {
   parseRegistroAziendeText
 } from "../src/providers/registroaziende.js";
@@ -34,10 +34,10 @@ import {
 } from "./helpers/fixtures.mjs";
 
 test("fixture: Future Tech keeps canonical data and promotes newer filed year", async () => {
-  const aziendeHtml = await loadFixture("companyreports/future-tech.html");
+  const companyReportsHtml = await loadFixture("companyreports/future-tech.html");
   const registroHtml = await loadFixture("registro/future-tech.html");
 
-  const aziende = parseAziendeText(htmlToText(aziendeHtml), {
+  const companyReports = parseCompanyReportsText(htmlToText(companyReportsHtml), {
     name: "FUTURE TECH SRL",
     url: "https://www.companyreports.it/11295150152"
   });
@@ -46,16 +46,16 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
     { url: "https://registroaziende.it/azienda/future-tech-srl-basiglio" }
   );
 
-  assert.equal(aziende.vat, "11295150152");
-  assert.equal(aziende.status, "Attiva");
-  assert.equal(aziende.rea, "MI-1453877");
-  assert.equal(aziende.financials.revenue.value, 1_992_222);
-  assert.equal(aziende.financials.personnelCost.value, 151_312);
+  assert.equal(companyReports.vat, "11295150152");
+  assert.equal(companyReports.status, "Attiva");
+  assert.equal(companyReports.rea, "MI-1453877");
+  assert.equal(companyReports.financials.revenue.value, 1_992_222);
+  assert.equal(companyReports.financials.personnelCost.value, 151_312);
 
   assert.equal(registro.vat, "11295150152");
   assert.equal(registro.financials.balanceHistory[0].year, 2025);
 
-  const company = normalizeCompany(aziende, null, aziende.vat);
+  const company = normalizeCompany(companyReports, null, companyReports.vat);
   enrichCompanyWithFallback(company, registro);
 
   assert.equal(company.name, "FUTURE TECH S.R.L.");
@@ -75,11 +75,11 @@ test("fixture: Future Tech keeps canonical data and promotes newer filed year", 
 });
 
 test("fixture: Rubino keeps Xray enrichment after canonical CompanyReports data", async () => {
-  const aziendeHtml = await loadFixture("companyreports/rubino.html");
+  const companyReportsHtml = await loadFixture("companyreports/rubino.html");
   const registroHtml = await loadFixture("registro/rubino.html");
   const xrayHtml = await loadFixture("xray/rubino.html");
 
-  const aziende = parseAziendeText(htmlToText(aziendeHtml), {
+  const companyReports = parseCompanyReportsText(htmlToText(companyReportsHtml), {
     name: "RUBINO - S.R.L.",
     url: "https://www.companyreports.it/05488440651"
   });
@@ -92,13 +92,13 @@ test("fixture: Rubino keeps Xray enrichment after canonical CompanyReports data"
     url: "https://xrayfinance.it/rubino-s-r-l-15"
   });
 
-  assert.equal(aziende.vat, "05488440651");
+  assert.equal(companyReports.vat, "05488440651");
   assert.equal(registro.vat, "05488440651");
   assert.equal(xray.vat, "05488440651");
   assert.equal(xray.financials.ebitda, 283_000);
   assert.equal(xray.financials.ebitdaMargin, 12.41);
 
-  const company = normalizeCompany(aziende, null, aziende.vat);
+  const company = normalizeCompany(companyReports, null, companyReports.vat);
   enrichCompanyWithFallback(company, registro);
   enrichCompanyWithXray(company, xray);
 

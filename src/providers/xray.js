@@ -1,4 +1,4 @@
-import { slugifyCompanyName } from "./aziende.js";
+import { slugifyCompanyName } from "./companyreports.js";
 
 const BASE_URL = "https://xrayfinance.it";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -229,7 +229,19 @@ async function writeCache(key, value) {
 }
 
 
-async function fetchHtml(url, options = {}) {
+// Concurrent lookups (the speculative site-label search and the canonical
+// name retry) walk overlapping slugs. Coalescing by request identity means the
+// same URL is fetched once while it is in flight instead of once per lookup:
+// this is what stops the duplicate /rubino-s-r-l-15 style request storm.
+const inFlightFetches = new Map();
+
+function fetchIdentity(url, options = {}) {
+  return `${String(options.method || "GET").toUpperCase()} ${url} ${
+    options.body || ""
+  }`;
+}
+
+async function performFetch(url, options = {}) {
   try {
     const response = await fetch(url, {
       method: options.method || "GET",
@@ -258,6 +270,19 @@ async function fetchHtml(url, options = {}) {
   } catch {
     return { response: null, html: null };
   }
+}
+
+function fetchHtml(url, options = {}) {
+  const key = fetchIdentity(url, options);
+  const existing = inFlightFetches.get(key);
+  if (existing) return existing;
+
+  const pending = performFetch(url, options).finally(() => {
+    if (inFlightFetches.get(key) === pending) inFlightFetches.delete(key);
+  });
+
+  inFlightFetches.set(key, pending);
+  return pending;
 }
 
 function findSearchInput(doc) {
@@ -385,11 +410,13 @@ async function findXrayCompanyViaPublicSearch(vat) {
   return company;
 }
 
-async function fetchSlug(slug) {
-  const key = `xray:v3:slug:${slug}`;
-  const cached = await readCache(key);
-  if (cached !== undefined) return cached;
+// Same as `fetchHtml`, but at slug granularity so the cache check, the
+// request and the parse are shared by concurrent lookups probing the same
+// profile. A transient failure (503/429) is still never cached, so a later
+// lookup can recover, but it is not requested twice in parallel.
+const inFlightSlugs = new Map();
 
+async function fetchSlugNetwork(key, slug) {
   const url = `${BASE_URL}/${encodeURIComponent(slug)}`;
 
   const result = await fetchHtml(url);
@@ -415,6 +442,24 @@ async function fetchSlug(slug) {
   }
 
   return company || null;
+}
+
+async function fetchSlug(slug) {
+  const key = `xray:v3:slug:${slug}`;
+  const cached = await readCache(key);
+  if (cached !== undefined) return cached;
+
+  const existing = inFlightSlugs.get(key);
+  if (existing) return existing;
+
+  const pending = fetchSlugNetwork(key, slug)
+    .catch(() => null)
+    .finally(() => {
+      if (inFlightSlugs.get(key) === pending) inFlightSlugs.delete(key);
+    });
+
+  inFlightSlugs.set(key, pending);
+  return pending;
 }
 
 async function firstVatMatch(slugs, vat, { batchSize = 2 } = {}) {

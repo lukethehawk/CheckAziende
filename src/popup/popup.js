@@ -1,5 +1,5 @@
 import { checkItalianVatOnVies } from "../providers/vies.js";
-import { findAziendeCompaniesByContext } from "../providers/aziende.js";
+import { findCompanyReportsCompaniesByContext } from "../providers/companyreports.js";
 import { findRegistroAziendeCompaniesByContext } from "../providers/registroaziende.js";
 import {
   mergeProviderResultState,
@@ -24,6 +24,7 @@ import {
   describeFinancialProfile,
   evaluateFinancialProfile
 } from "../financial-evaluation.js";
+import { createDataCompletionTracker, watchProviderUpdates } from "./data-completion.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -94,6 +95,11 @@ const elements = {
   atecoSection: document.querySelector("#ateco-section"),
   atecoCode: document.querySelector("#ateco-code"),
   atecoDescription: document.querySelector("#ateco-description"),
+  sectorComparisonSection: document.querySelector("#sector-comparison-section"),
+  sectorCompanyRevenue: document.querySelector("#sector-company-revenue"),
+  sectorMedianRevenue: document.querySelector("#sector-median-revenue"),
+  sectorDifference: document.querySelector("#sector-difference"),
+  sectorSample: document.querySelector("#sector-sample"),
   balanceHistorySection: document.querySelector("#balance-history-section"),
   balanceHistoryCount: document.querySelector("#balance-history-count"),
   balanceHistory: document.querySelector("#balance-history"),
@@ -108,8 +114,9 @@ let currentDomainLookup = null;
 let currentOwnerCityHints = [];
 let companyIsVisible = false;
 let dataCompletionGeneration = 0;
-let dataCompletionTimer = null;
-const pendingDataPromises = new Set();
+const dataCompletion = createDataCompletionTracker((visible) => {
+  elements.dataCompletionStatus.classList.toggle("hidden", !visible);
+});
 
 function digitsOnly(value) {
   return String(value || "").replace(/\D/g, "");
@@ -194,59 +201,12 @@ function stopLoading() {
 }
 
 function resetDataCompletionStatus() {
-  dataCompletionGeneration += 1;
-  pendingDataPromises.clear();
-
-  if (dataCompletionTimer) {
-    clearTimeout(dataCompletionTimer);
-    dataCompletionTimer = null;
-  }
-
-  elements.dataCompletionStatus.classList.add("hidden");
+  dataCompletionGeneration = dataCompletion.reset();
   return dataCompletionGeneration;
 }
 
 function trackDataCompletion(promise, generation) {
-  if (
-    !promise ||
-    generation !== dataCompletionGeneration ||
-    pendingDataPromises.has(promise)
-  ) {
-    return;
-  }
-
-  pendingDataPromises.add(promise);
-
-  if (!dataCompletionTimer && elements.dataCompletionStatus.classList.contains("hidden")) {
-    dataCompletionTimer = setTimeout(() => {
-      dataCompletionTimer = null;
-
-      if (
-        generation === dataCompletionGeneration &&
-        pendingDataPromises.size > 0 &&
-        companyIsVisible
-      ) {
-        elements.dataCompletionStatus.classList.remove("hidden");
-      }
-    }, 350);
-  }
-
-  const finish = () => {
-    if (generation !== dataCompletionGeneration) return;
-
-    pendingDataPromises.delete(promise);
-
-    if (pendingDataPromises.size === 0) {
-      if (dataCompletionTimer) {
-        clearTimeout(dataCompletionTimer);
-        dataCompletionTimer = null;
-      }
-
-      elements.dataCompletionStatus.classList.add("hidden");
-    }
-  };
-
-  Promise.resolve(promise).then(finish, finish);
+  dataCompletion.track(promise, generation);
 }
 
 function showManual({ allowCancel = companyIsVisible, message } = {}) {
@@ -530,14 +490,40 @@ function renderAteco(ateco) {
   elements.atecoDescription.textContent = ateco.description || "";
 }
 
-function renderProviderSource(company) {
-  if (!company?.provider) {
+function renderSectorComparison(comparison) {
+  const valid = comparison?.sourceName === "Aziende.it" &&
+    Number.isFinite(comparison.companyRevenue) && comparison.companyRevenue >= 0 &&
+    Number.isFinite(comparison.medianRevenue) && comparison.medianRevenue > 0;
+  elements.sectorComparisonSection.classList.toggle("hidden", !valid);
+  if (!valid) return false;
+
+  const province = /^[A-Z]{2}$/.test(comparison.province || "")
+    ? ` (${comparison.province})` : "";
+  elements.sectorCompanyRevenue.textContent =
+    `Fatturato azienda${comparison.year ? ` ${comparison.year}` : ""}: ${formatCompactCurrency(comparison.companyRevenue)}`;
+  elements.sectorMedianRevenue.textContent =
+    `Mediana settore${province}: ${formatCompactCurrency(comparison.medianRevenue)}`;
+  const hasDifference = Number.isFinite(comparison.differencePct);
+  elements.sectorDifference.classList.toggle("hidden", !hasDifference);
+  elements.sectorDifference.textContent = hasDifference
+    ? `${comparison.differencePct >= 0 ? "+" : ""}${formatPercent(comparison.differencePct)} rispetto alla mediana`
+    : "";
+  const hasSample = Number.isInteger(comparison.sampleSize) && comparison.sampleSize > 0;
+  elements.sectorSample.classList.toggle("hidden", !hasSample);
+  elements.sectorSample.textContent = hasSample
+    ? `Campione: ${formatCompactNumber(comparison.sampleSize, 0)} imprese` : "";
+  return true;
+}
+
+function renderProviderSource(company, sectorVisible = false) {
+  if (!company?.provider && !sectorVisible) {
     elements.providerSource.classList.add("hidden");
     elements.providerSource.textContent = "";
     return;
   }
 
-  elements.providerSource.textContent = `Fonti dati: ${company.provider}`;
+  elements.providerSource.textContent =
+    `Fonti dati: ${[company?.provider, sectorVisible ? "Aziende.it" : ""].filter(Boolean).join(", ")}`;
   elements.providerSource.classList.remove("hidden");
 }
 
@@ -671,6 +657,7 @@ function renderFinancialProfile(evaluation, financials) {
 
 function showUnidentified(message) {
   companyIsVisible = false;
+  dataCompletion.hide();
   elements.companyView.classList.add("hidden");
   elements.unidentifiedView.classList.remove("hidden");
   const copy = elements.unidentifiedView.querySelector(".unidentified-copy");
@@ -683,7 +670,7 @@ function showUnidentified(message) {
 
 function renderCompany(
   company,
-  { source = "automatic", evidenceLabel = "", assessment = null } = {}
+  { source = "automatic", evidenceLabel = "", assessment = null, sectorComparison = null } = {}
 ) {
   const vat = company?.vat || digitsOnly(elements.input.value);
   const name = fallbackCompanyName(company, source);
@@ -741,7 +728,8 @@ function renderCompany(
     company?.financials?.balanceHistory,
     company?.financials?.revenue?.year
   );
-  renderProviderSource(company);
+  const sectorVisible = renderSectorComparison(sectorComparison);
+  renderProviderSource(company, sectorVisible);
   renderFinancialProfile(company?.evaluation, company?.financials);
   renderContacts(source === "manual" ? null : currentScan);
 
@@ -832,6 +820,7 @@ async function lookupVat(
   setLoading("Recupero dati aziendali…");
 
   const viesData = await getViesData(vat, bypassCache);
+  if (completionGeneration !== dataCompletionGeneration) return false;
 
   setLoading("Recupero dati societari e finanziari…");
 
@@ -851,6 +840,7 @@ async function lookupVat(
       ...providerCityHints(viesData)
     ])
   });
+  if (completionGeneration !== dataCompletionGeneration) return false;
 
   const renderResolved = (providerResult) => {
     const company = normalizeCompany(
@@ -888,87 +878,40 @@ async function lookupVat(
         (source === "manual"
           ? "P.IVA inserita manualmente"
           : "P.IVA identificata dal sito"),
-      assessment
+      assessment,
+      sectorComparison: providerResult?.aziende?.sectorComparison
     });
 
     return true;
   };
 
   let activeProviderResult = mergeProviderResultState({}, resolved);
+  let accepted = renderResolved(activeProviderResult);
+  if (accepted) dataCompletion.display(completionGeneration);
+
+  const stillShowingVat = () =>
+    companyIsVisible && digitsOnly(elements.vat.textContent) === vat;
+  const isCurrentLookup = () =>
+    completionGeneration === dataCompletionGeneration &&
+    (!accepted || stillShowingVat());
 
   const applyProviderUpdate = (patch) => {
-    activeProviderResult = mergeProviderResultState(
-      activeProviderResult,
-      patch
-    );
-    return renderResolved(activeProviderResult);
+    if (!isCurrentLookup()) return false;
+    activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
+    const rendered = renderResolved(activeProviderResult);
+    if (rendered) {
+      if (!accepted) hideManual();
+      accepted = true;
+      dataCompletion.display(completionGeneration);
+    }
+    return rendered;
   };
-
-  const accepted = renderResolved(activeProviderResult);
+  watchProviderUpdates(resolved, completionGeneration, isCurrentLookup, applyProviderUpdate, trackDataCompletion);
 
   if (!accepted) {
     elements.button.disabled = false;
     return false;
   }
-
-  const stillShowingVat = () =>
-    companyIsVisible && digitsOnly(elements.vat.textContent) === vat;
-
-  const attachProviderUpdates = (providerResult) => {
-    if (!providerResult) return;
-
-    if (providerResult.backgroundCanonical) {
-      trackDataCompletion(
-        providerResult.backgroundCanonical,
-        completionGeneration
-      );
-      providerResult.backgroundCanonical.then((update) => {
-        if (!update || !stillShowingVat()) return;
-        applyProviderUpdate(update);
-      });
-    }
-
-    if (providerResult.backgroundXray) {
-      trackDataCompletion(
-        providerResult.backgroundXray,
-        completionGeneration
-      );
-      providerResult.backgroundXray.then((xray) => {
-        if (!xray || !stillShowingVat()) return;
-        applyProviderUpdate({ xray });
-      });
-    }
-
-    if (providerResult.backgroundVerification) {
-      trackDataCompletion(
-        providerResult.backgroundVerification,
-        completionGeneration
-      );
-      providerResult.backgroundVerification.then((update) => {
-        if (!update?.registro || !stillShowingVat()) return;
-
-        applyProviderUpdate({
-          registro: update.registro,
-          verification: update.verification
-        });
-      });
-    }
-  };
-
-  attachProviderUpdates(resolved);
-
-  if (resolved.backgroundRefresh) {
-    trackDataCompletion(
-      resolved.backgroundRefresh,
-      completionGeneration
-    );
-    resolved.backgroundRefresh.then((fresh) => {
-      if (!fresh || !stillShowingVat()) return;
-      applyProviderUpdate(fresh);
-      attachProviderUpdates(fresh);
-    });
-  }
-
   hideManual();
   elements.button.disabled = false;
   return true;
@@ -1019,24 +962,27 @@ function providerCandidateNames() {
 }
 
 async function lookupCompanyFromDomain() {
+  if (companyIsVisible) return false;
+  const lookupGeneration = dataCompletionGeneration;
   const names = providerCandidateNames();
   if (!names.length) return false;
 
   setLoading("Cerco una possibile corrispondenza…");
 
-  const [aziendeCandidates, registroCandidates] = await Promise.all([
-    findAziendeCompaniesByContext({ names }),
+  const [companyReportsCandidates, registroCandidates] = await Promise.all([
+    findCompanyReportsCompaniesByContext({ names }),
     findRegistroAziendeCompaniesByContext({
       names,
       cityHints: currentOwnerCityHints
     })
   ]);
+  if (lookupGeneration !== dataCompletionGeneration || companyIsVisible) return false;
 
   const candidatesByVat = new Map();
 
-  // Aziende.it remains preferred when both discovery sources find the same VAT,
-  // while RegistroAziende can discover entities that Aziende.it does not expose.
-  for (const company of [...registroCandidates, ...aziendeCandidates]) {
+  // CompanyReports.it remains preferred when both discovery sources find the same VAT,
+  // while RegistroAziende can discover entities that CompanyReports.it does not expose.
+  for (const company of [...registroCandidates, ...companyReportsCandidates]) {
     if (!company?.vat) continue;
     candidatesByVat.set(company.vat, company);
   }
@@ -1061,6 +1007,7 @@ async function lookupCompanyFromDomain() {
   const best = assessed[0];
   if (!best) return false;
 
+  const completionGeneration = resetDataCompletionStatus();
   const resolved = await resolveCompanyProviders({
     vat: best.company.vat,
     names: unique([best.company.name, ...names]),
@@ -1069,28 +1016,40 @@ async function lookupCompanyFromDomain() {
       ...currentOwnerCityHints
     ])
   });
+  if (completionGeneration !== dataCompletionGeneration) return false;
+  let activeProviderResult = mergeProviderResultState({}, resolved);
+  const renderResolved = (result) => {
+    const company = normalizeCompany(
+      result.primary || best.company,
+      null,
+      best.company.vat
+    );
+    if (result.registro && result.primary !== result.registro) {
+      enrichCompanyWithFallback(company, result.registro);
+    }
+    enrichCompanyWithXray(company, result.xray);
+    company.verification = result.verification || null;
+    company.evaluation = evaluateFinancialProfile(company);
+    renderCompany(company, {
+      source: "domain",
+      evidenceLabel: currentDomainLookup?.registrableDomain
+        ? `Corrispondenza da ${currentDomainLookup.registrableDomain}`
+        : "Corrispondenza da dominio e nome",
+      assessment: best.assessment,
+      sectorComparison: result.aziende?.sectorComparison
+    });
+    dataCompletion.display(completionGeneration);
+  };
 
-  const company = normalizeCompany(
-    resolved.primary || best.company,
-    null,
-    best.company.vat
-  );
-
-  if (resolved.registro && resolved.primary !== resolved.registro) {
-    enrichCompanyWithFallback(company, resolved.registro);
-  }
-
-  enrichCompanyWithXray(company, resolved.xray);
-  company.verification = resolved.verification || null;
-  company.evaluation = evaluateFinancialProfile(company);
-
-  renderCompany(company, {
-    source: "domain",
-    evidenceLabel: currentDomainLookup?.registrableDomain
-      ? `Corrispondenza da ${currentDomainLookup.registrableDomain}`
-      : "Corrispondenza da dominio e nome",
-    assessment: best.assessment
-  });
+  renderResolved(activeProviderResult);
+  const isCurrentLookup = () =>
+    completionGeneration === dataCompletionGeneration &&
+    companyIsVisible &&
+    digitsOnly(elements.vat.textContent) === best.company.vat;
+  watchProviderUpdates(resolved, completionGeneration, isCurrentLookup, (patch) => {
+    activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
+    renderResolved(activeProviderResult);
+  }, trackDataCompletion);
 
   hideManual();
   return true;
@@ -1173,7 +1132,7 @@ async function inspectActivePage() {
           candidate
         });
 
-        if (accepted) return;
+        if (accepted || companyIsVisible) return;
       }
     }
 
@@ -1198,17 +1157,25 @@ async function inspectActivePage() {
           candidate
         });
 
-        if (accepted) return;
+        if (accepted || companyIsVisible) return;
       }
     }
 
     const domainMatchFound = await lookupCompanyFromDomain();
     if (domainMatchFound) return;
+    if (companyIsVisible) {
+      stopLoading();
+      return;
+    }
 
     showUnidentified(
       "Nessuna società identificata automaticamente. Inserisci una P.IVA per cercarla manualmente."
     );
   } catch {
+    if (companyIsVisible) {
+      stopLoading();
+      return;
+    }
     showUnidentified(
       "Non riesco a identificare automaticamente una società su questa pagina."
     );
