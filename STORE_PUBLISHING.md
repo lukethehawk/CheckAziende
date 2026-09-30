@@ -29,9 +29,9 @@ The GitHub release workflow creates:
 - `CheckAziende-<version>-edge.zip`
 - `CheckAziende-<version>-opera.zip`
 
-Firefox keeps the SVG toolbar icon and Mozilla-specific manifest declarations.
+Firefox keeps the SVG toolbar icon and Mozilla-specific manifest declarations. The generated Firefox manifest moves only `https://www.aziende.it/*` from `host_permissions` to `optional_host_permissions`; users grant it from the popup’s **Abilita** button, not from an automatic prompt. All other host permissions remain required.
 
-Chromium-derived builds remove Firefox-only manifest keys and use PNG toolbar icons.
+Chromium-derived builds remove Firefox-only manifest keys and use PNG toolbar icons. Chrome, Edge and Opera keep `https://www.aziende.it/*` in required `host_permissions`, with no optional entry for that host. `npm run validate:stores` checks this browser-specific permission split.
 
 ## Firefox AMO
 

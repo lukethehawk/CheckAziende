@@ -4,6 +4,7 @@ import { findRegistroAziendeCompaniesByContext } from "../providers/registroazie
 import {
   mergeProviderResultState,
   previousBalanceRows,
+  resolveAziendeEnrichment,
   resolveCompanyProviders
 } from "../providers/orchestrator.js";
 import {
@@ -25,6 +26,11 @@ import {
   evaluateFinancialProfile
 } from "../financial-evaluation.js";
 import { createDataCompletionTracker, watchProviderUpdates } from "./data-completion.js";
+import {
+  hasAziendePermission,
+  requestAziendePermission,
+  watchAziendePermissionRemoved
+} from "../permissions.js";
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -96,6 +102,10 @@ const elements = {
   atecoCode: document.querySelector("#ateco-code"),
   atecoDescription: document.querySelector("#ateco-description"),
   sectorComparisonSection: document.querySelector("#sector-comparison-section"),
+  sectorData: document.querySelector("#sector-data"),
+  sectorPermission: document.querySelector("#sector-permission"),
+  enableAziende: document.querySelector("#enable-aziende"),
+  aziendeFirefoxNote: document.querySelector("#aziende-firefox-note"),
   sectorCompanyRevenue: document.querySelector("#sector-company-revenue"),
   sectorMedianRevenue: document.querySelector("#sector-median-revenue"),
   sectorDifference: document.querySelector("#sector-difference"),
@@ -114,6 +124,18 @@ let currentDomainLookup = null;
 let currentOwnerCityHints = [];
 let companyIsVisible = false;
 let dataCompletionGeneration = 0;
+// Last known state of the optional Aziende.it host permission. `known` stays
+// false until the first `permissions.contains` answers, so the prompt is never
+// shown from an assumption.
+let aziendePermissionGranted = false;
+let aziendePermissionKnown = false;
+let aziendePermissionRevision = 0;
+let aziendeGrantGeneration = 0;
+// The currently displayed company, expressed as the operations a granted
+// permission needs: re-render, apply an Aziende.it patch and check that the
+// view is still the one the lookup produced.
+let displayedLookup = null;
+let sectorComparisonVisible = false;
 const dataCompletion = createDataCompletionTracker((visible) => {
   elements.dataCompletionStatus.classList.toggle("hidden", !visible);
 });
@@ -494,8 +516,18 @@ function renderSectorComparison(comparison) {
   const valid = comparison?.sourceName === "Aziende.it" &&
     Number.isFinite(comparison.companyRevenue) && comparison.companyRevenue >= 0 &&
     Number.isFinite(comparison.medianRevenue) && comparison.medianRevenue > 0;
-  elements.sectorComparisonSection.classList.toggle("hidden", !valid);
-  if (!valid) return false;
+  elements.sectorData.classList.toggle("hidden", !valid);
+  sectorComparisonVisible = valid;
+
+  if (!valid) {
+    elements.sectorCompanyRevenue.textContent = "";
+    elements.sectorMedianRevenue.textContent = "";
+    elements.sectorDifference.classList.add("hidden");
+    elements.sectorDifference.textContent = "";
+    elements.sectorSample.classList.add("hidden");
+    elements.sectorSample.textContent = "";
+    return false;
+  }
 
   const province = /^[A-Z]{2}$/.test(comparison.province || "")
     ? ` (${comparison.province})` : "";
@@ -513,6 +545,99 @@ function renderSectorComparison(comparison) {
   elements.sectorSample.textContent = hasSample
     ? `Campione: ${formatCompactNumber(comparison.sampleSize, 0)} imprese` : "";
   return true;
+}
+
+function displayedVat() {
+  return digitsOnly(elements.vat.textContent);
+}
+
+function setDisplayedLookup(lookup) {
+  displayedLookup?.finishDisplayedWork();
+  if (lookup) {
+    lookup.displayedWork = new Promise((resolve) => {
+      lookup.finishDisplayedWork = resolve;
+    });
+  }
+  displayedLookup = lookup;
+}
+
+// The compact sector section shows either the Aziende.it comparison or, when
+// the optional host permission is missing, the prompt inviting the user to
+// grant it. No company on screen means neither is shown.
+function updateSectorPermission() {
+  const promptVisible =
+    companyIsVisible && aziendePermissionKnown && !aziendePermissionGranted;
+  elements.sectorPermission.classList.toggle("hidden", !promptVisible);
+  elements.aziendeFirefoxNote.classList.toggle(
+    "hidden",
+    !promptVisible || typeof globalThis.browser?.runtime?.getBrowserInfo !== "function"
+  );
+  elements.sectorComparisonSection.classList.toggle(
+    "hidden",
+    !promptVisible && !sectorComparisonVisible
+  );
+}
+
+// Reads the exact Aziende.it origin permission before any provider work. An
+// unsupported or failing API keeps the provider disabled.
+async function readAziendePermission() {
+  const revision = ++aziendePermissionRevision;
+  const granted = await hasAziendePermission();
+  if (revision !== aziendePermissionRevision) return aziendePermissionGranted;
+  aziendePermissionKnown = true;
+  aziendePermissionGranted = granted;
+  updateSectorPermission();
+  return granted;
+}
+
+// Runs right after the user grants the permission: it re-renders the displayed
+// company (a cached Aziende.it snapshot may already exist) and starts a single
+// targeted Aziende.it lookup for the VAT currently on screen, without reopening
+// the popup or rerunning the canonical lookup.
+async function refreshAziendeForDisplayedCompany() {
+  const lookup = displayedLookup;
+  if (!lookup || !aziendePermissionGranted) return;
+
+  const vat = displayedVat();
+  const isDisplayed = () => displayedLookup === lookup &&
+    companyIsVisible && displayedVat() === lookup.vat;
+  if (!vat || !isDisplayed()) return;
+
+  // Permission can be revoked between the click and the provider call: check
+  // the exact origin again right before the real lookup.
+  const granted = await readAziendePermission();
+  if (!isDisplayed()) return;
+  if (!granted) {
+    lookup.rerender();
+    return;
+  }
+
+  lookup.rerender();
+  if (lookup.refreshingAziende) return;
+  lookup.refreshingAziende = true;
+
+  const { pendingUpdates } = resolveAziendeEnrichment({
+    vat,
+    names: lookup.names,
+    aziendeAllowed: true
+  });
+
+  const generation = dataCompletionGeneration;
+  dataCompletion.display(generation);
+  watchProviderUpdates(
+    { pendingUpdates },
+    generation,
+    isDisplayed,
+    (patch) => lookup.applyPatch(patch),
+    (promise, current) => trackDataCompletion(
+      Promise.race([promise, lookup.displayedWork]), current
+    )
+  );
+
+  const inFlight = pendingUpdates[0]?.promise ?? Promise.resolve();
+  Promise.resolve(inFlight).finally(() => {
+    lookup.refreshingAziende = false;
+  });
 }
 
 function renderProviderSource(company, sectorVisible = false) {
@@ -657,6 +782,7 @@ function renderFinancialProfile(evaluation, financials) {
 
 function showUnidentified(message) {
   companyIsVisible = false;
+  setDisplayedLookup(null);
   dataCompletion.hide();
   elements.companyView.classList.add("hidden");
   elements.unidentifiedView.classList.remove("hidden");
@@ -728,13 +854,19 @@ function renderCompany(
     company?.financials?.balanceHistory,
     company?.financials?.revenue?.year
   );
-  const sectorVisible = renderSectorComparison(sectorComparison);
+  // A cached Aziende.it snapshot must never render while the optional host
+  // permission is missing; the comparison is re-applied as soon as it is
+  // granted.
+  const sectorVisible = renderSectorComparison(
+    aziendePermissionGranted ? sectorComparison : null
+  );
   renderProviderSource(company, sectorVisible);
   renderFinancialProfile(company?.evaluation, company?.financials);
   renderContacts(source === "manual" ? null : currentScan);
 
   elements.companyView.classList.remove("hidden");
   companyIsVisible = true;
+  updateSectorPermission();
   stopLoading();
 }
 
@@ -824,6 +956,12 @@ async function lookupVat(
 
   setLoading("Recupero dati societari e finanziari…");
 
+  // The exact Aziende.it origin is checked before the resolution starts, so a
+  // missing permission never reaches the provider (cache included).
+  const aziendeAllowed = await readAziendePermission();
+  const grantGeneration = aziendeGrantGeneration;
+  if (completionGeneration !== dataCompletionGeneration) return false;
+
   const names = unique([
     ...(nameHints || []),
     ...providerNames(viesData)
@@ -831,6 +969,7 @@ async function lookupVat(
   const resolved = await resolveCompanyProviders({
     vat,
     names,
+    aziendeAllowed,
     provinceHints: unique([
       ...(provinceHints || []),
       ...providerProvinceHints(viesData, candidate)
@@ -900,12 +1039,37 @@ async function lookupVat(
     activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
     const rendered = renderResolved(activeProviderResult);
     if (rendered) {
-      if (!accepted) hideManual();
+      if (displayedLookup !== lookup) setDisplayedLookup(lookup);
+      if (!accepted) {
+        hideManual();
+        if (aziendePermissionGranted && (!aziendeAllowed || grantGeneration !== aziendeGrantGeneration)) {
+          trackDataCompletion(refreshAziendeForDisplayedCompany(), completionGeneration);
+        }
+      }
       accepted = true;
       dataCompletion.display(completionGeneration);
     }
     return rendered;
   };
+
+  // Permission changes follow the visible card, even while a replacement
+  // lookup is resolving. Canonical provider updates keep their generation guard.
+  const lookup = {
+    vat,
+    names,
+    applyPatch: (patch) => {
+      if (!stillShowingVat()) return false;
+      activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
+      return renderResolved(activeProviderResult);
+    },
+    rerender: () => {
+      if (!stillShowingVat()) return false;
+      return renderResolved(activeProviderResult);
+    },
+    refreshingAziende: false
+  };
+  if (accepted) setDisplayedLookup(lookup);
+
   watchProviderUpdates(resolved, completionGeneration, isCurrentLookup, applyProviderUpdate, trackDataCompletion);
 
   if (!accepted) {
@@ -914,6 +1078,10 @@ async function lookupVat(
   }
   hideManual();
   elements.button.disabled = false;
+  // A grant may have happened after this lookup captured its permission flag.
+  if (aziendePermissionGranted && (!aziendeAllowed || grantGeneration !== aziendeGrantGeneration)) {
+    await refreshAziendeForDisplayedCompany();
+  }
   return true;
 }
 
@@ -1008,9 +1176,14 @@ async function lookupCompanyFromDomain() {
   if (!best) return false;
 
   const completionGeneration = resetDataCompletionStatus();
+  // Exact Aziende.it origin check before the resolution: missing permission
+  // means the provider is never invoked.
+  const aziendeAllowed = await readAziendePermission();
+  const grantGeneration = aziendeGrantGeneration;
   const resolved = await resolveCompanyProviders({
     vat: best.company.vat,
     names: unique([best.company.name, ...names]),
+    aziendeAllowed,
     cityHints: unique([
       best.company.city,
       ...currentOwnerCityHints
@@ -1042,16 +1215,47 @@ async function lookupCompanyFromDomain() {
   };
 
   renderResolved(activeProviderResult);
+  const stillShowingVat = () => companyIsVisible &&
+    displayedVat() === best.company.vat;
   const isCurrentLookup = () =>
-    completionGeneration === dataCompletionGeneration &&
-    companyIsVisible &&
-    digitsOnly(elements.vat.textContent) === best.company.vat;
-  watchProviderUpdates(resolved, completionGeneration, isCurrentLookup, (patch) => {
+    completionGeneration === dataCompletionGeneration && stillShowingVat();
+
+  const applyProviderUpdate = (patch) => {
+    if (!isCurrentLookup()) return false;
     activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
     renderResolved(activeProviderResult);
-  }, trackDataCompletion);
+    return true;
+  };
+
+  setDisplayedLookup({
+    vat: best.company.vat,
+    names: unique([best.company.name, ...names]),
+    applyPatch: (patch) => {
+      if (!stillShowingVat()) return false;
+      activeProviderResult = mergeProviderResultState(activeProviderResult, patch);
+      renderResolved(activeProviderResult);
+      return true;
+    },
+    rerender: () => {
+      if (!stillShowingVat()) return false;
+      renderResolved(activeProviderResult);
+      return true;
+    },
+    refreshingAziende: false
+  });
+
+  watchProviderUpdates(
+    resolved,
+    completionGeneration,
+    isCurrentLookup,
+    applyProviderUpdate,
+    trackDataCompletion
+  );
 
   hideManual();
+  if (aziendePermissionGranted && (!aziendeAllowed || grantGeneration !== aziendeGrantGeneration)) {
+    await refreshAziendeForDisplayedCompany();
+  }
   return true;
 }
 
@@ -1232,5 +1436,44 @@ elements.copyEmail.addEventListener("click", () =>
 elements.copyPhone.addEventListener("click", () =>
   copyValue(elements.phone.textContent, elements.copyPhone)
 );
+
+// A click is the only path that can request the optional host permission, and
+// `permissions.request` must run synchronously inside that gesture: the call
+// happens before any `await`. A denial or an engine error just leaves the
+// prompt with a usable button.
+elements.enableAziende.addEventListener("click", () => {
+  const decision = requestAziendePermission();
+  elements.enableAziende.disabled = true;
+
+  decision
+    .then((granted) => {
+      elements.enableAziende.disabled = false;
+      if (!granted) return;
+
+      ++aziendePermissionRevision;
+      ++aziendeGrantGeneration;
+      aziendePermissionKnown = true;
+      aziendePermissionGranted = true;
+      updateSectorPermission();
+      return refreshAziendeForDisplayedCompany();
+    })
+    .catch(() => {
+      elements.enableAziende.disabled = false;
+    });
+});
+
+// Revocation hides a cached comparison immediately without touching any cache;
+// the exact origin is rechecked again before every real lookup.
+watchAziendePermissionRemoved(() => {
+  ++aziendePermissionRevision;
+  aziendePermissionKnown = true;
+  aziendePermissionGranted = false;
+  updateSectorPermission();
+  displayedLookup?.rerender();
+});
+
+// Resolve the permission state once at startup so a company rendered from a
+// cached snapshot already knows whether the comparison may be shown.
+readAziendePermission();
 
 inspectActivePage();

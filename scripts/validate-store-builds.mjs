@@ -2,11 +2,31 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 
+import {
+  AZIENDE_HOST_PERMISSION,
+  STORE_TARGETS
+} from "./build-stores.mjs";
+
 const root = process.cwd();
-const targets = ["firefox", "chrome", "edge", "opera"];
+const targets = STORE_TARGETS;
 const backgroundPath = "src/background/service-worker.js";
 const manifests = {};
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+const BROAD_HOST_PERMISSIONS = new Set(["<all_urls>", "*://*/*", "*"]);
+
+function sameStringList(left, right) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function hostPermissions(manifest) {
+  return {
+    required: manifest.host_permissions || [],
+    optional: manifest.optional_host_permissions || []
+  };
+}
 
 function parsePng(buffer, expectedSize, label) {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -148,6 +168,65 @@ if (rootManifest.manifest_version !== 3 ||
   );
 }
 await readFile(join(root, rootBackground.service_worker));
+
+const rootHostPermissions = rootManifest.host_permissions || [];
+if (!rootHostPermissions.includes(AZIENDE_HOST_PERMISSION)) {
+  throw new Error(
+    `root manifest: ${AZIENDE_HOST_PERMISSION} must stay a required host permission`
+  );
+}
+if (
+  (rootManifest.optional_host_permissions || []).includes(AZIENDE_HOST_PERMISSION)
+) {
+  throw new Error(
+    `root manifest: ${AZIENDE_HOST_PERMISSION} must not be an optional host permission`
+  );
+}
+const rootOtherHostPermissions = rootHostPermissions.filter(
+  (host) => host !== AZIENDE_HOST_PERMISSION
+);
+const allowedHostPermissions = new Set(rootHostPermissions);
+
+for (const target of targets) {
+  const { required, optional } = hostPermissions(manifests[target]);
+
+  // No build may add a host the root manifest does not declare, or broaden to
+  // an all-hosts wildcard.
+  for (const host of [...required, ...optional]) {
+    if (BROAD_HOST_PERMISSIONS.has(host) || !allowedHostPermissions.has(host)) {
+      throw new Error(`${target}: unexpected host permission ${host}`);
+    }
+  }
+
+  if (target === "firefox") {
+    if (required.includes(AZIENDE_HOST_PERMISSION)) {
+      throw new Error(
+        `firefox: ${AZIENDE_HOST_PERMISSION} must move out of required host_permissions`
+      );
+    }
+    if (!sameStringList(required, rootOtherHostPermissions)) {
+      throw new Error(
+        "firefox: required host_permissions must list every other root host unchanged"
+      );
+    }
+    if (!sameStringList(optional, [AZIENDE_HOST_PERMISSION])) {
+      throw new Error(
+        `firefox: optional_host_permissions must be exactly [${AZIENDE_HOST_PERMISSION}]`
+      );
+    }
+  } else {
+    if (!sameStringList(required, rootHostPermissions)) {
+      throw new Error(
+        `${target}: host_permissions must match the root manifest with ${AZIENDE_HOST_PERMISSION} still required`
+      );
+    }
+    if (optional.includes(AZIENDE_HOST_PERMISSION)) {
+      throw new Error(
+        `${target}: ${AZIENDE_HOST_PERMISSION} is required here, so it must not be optional`
+      );
+    }
+  }
+}
 
 const firefox = manifests.firefox;
 const firefoxBackground = firefox.background || {};
