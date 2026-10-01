@@ -4,7 +4,7 @@ Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda 
 
 ## Stato
 
-Versione `1.0.0`.
+Versione `1.1.1`.
 
 Il flusso di identificazione è volutamente conservativo:
 
