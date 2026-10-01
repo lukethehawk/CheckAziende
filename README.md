@@ -1,29 +1,42 @@
 # CheckAziende
 
-Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda collegata al sito aperto e prepara una scheda societaria da fonti pubbliche.
+Estensione WebExtension per Firefox e browser Chromium che identifica l'azienda collegata al sito aperto e prepara una scheda societaria usando fonti pubbliche.
 
-## Stato
+## Stato del progetto
 
-Versione `1.1.1`.
+Versione stabile: **1.1.1**
 
-Il flusso di identificazione è volutamente conservativo:
+Branch principali:
+
+- `main` — versione stabile e rilasciabile;
+- `beta/manual-company-search` — sviluppo sperimentale della ricerca manuale per ragione sociale, esclusa dalla release stabile.
+
+La release stabile mantiene la ricerca manuale per **Partita IVA**. La ricerca per ragione sociale resta separata finché il comportamento delle fonti pubbliche usate per il discovery non sarà sufficientemente affidabile.
+
+## Funzionalità principali
+
+CheckAziende prova a identificare il proprietario del sito con un flusso volutamente conservativo:
 
 1. cerca una P.IVA esplicita nella pagina, dando priorità a dati strutturati, footer e aree legali;
-2. se non trova nulla, controlla un piccolo insieme di pagine same-origin come Privacy, Note legali, Contatti e Chi siamo;
-3. distingue host, sottodominio e dominio registrabile, ad esempio `frontend.computergross.it` → `computergross.it`;
-4. raccoglie indizi di brand da titolo, `og:site_name`, application name, H1 e logo;
+2. se necessario controlla alcune pagine same-origin, come Privacy, Note legali, Contatti e Chi siamo;
+3. distingue host, sottodominio e dominio registrabile;
+4. raccoglie indizi di brand da titolo, `og:site_name`, application name, H1, logo e link alla home;
 5. assegna una confidence al risultato;
-6. se l'evidenza non basta, mostra **Non identificata** invece di attribuire numeri presenti casualmente nella pagina.
+6. se l'evidenza non è sufficiente mostra **Non identificata** invece di forzare un'associazione.
+
+Una volta nota la P.IVA, i provider societari completano la scheda con anagrafica, stato, sede, REA, attività, dati economici, storico bilanci ed eventuali indicatori finanziari.
 
 ## Confidence engine
 
-Le evidenze vengono normalizzate e pesate. Esempi:
+Le evidenze vengono normalizzate e pesate.
 
-- VAT/P.IVA in dati strutturati: evidenza molto forte;
+Indicativamente:
+
+- P.IVA in dati strutturati: evidenza molto forte;
 - P.IVA esplicita in footer o area legale: evidenza molto forte;
 - P.IVA in Privacy / Note legali / Contatti: evidenza forte;
-- dominio principale coincidente con quello della società: evidenza importante;
-- ragione sociale coerente con dominio, titolo e brand: evidenza utile ma non sufficiente da sola.
+- dominio coerente con la società: evidenza importante;
+- ragione sociale coerente con dominio e brand: evidenza utile ma non sufficiente da sola.
 
 Soglie UI:
 
@@ -31,11 +44,11 @@ Soglie UI:
 - `65–89`: **Possibile corrispondenza**
 - `< 65`: **Non identificata**
 
-Un match basato soltanto su dominio/nome viene limitato a un massimo di 89 finché non esiste una conferma più forte. Questo evita che un semplice logo o un nome simile diventino una falsa identificazione.
+Un match basato soltanto su dominio/nome viene limitato a un massimo di 89 finché non esiste una conferma più forte.
 
-## Identificazione dei domini
+## Gestione dei domini
 
-`src/domain.js` espone un contesto riutilizzabile dai provider societari:
+`src/domain.js` costruisce un contesto riutilizzabile dai provider:
 
 ```text
 hostname: frontend.computergross.it
@@ -46,48 +59,139 @@ brandHints: [...]
 searchNames: [...]
 ```
 
-La gestione dei public suffix multilivello copre i casi più comuni (ad esempio `.co.uk`, `.com.au`, `.co.jp`). In futuro può essere sostituita da una Public Suffix List completa senza cambiare l'interfaccia del motore.
+Sono gestiti anche diversi public suffix multilivello comuni, ad esempio `.co.uk`, `.com.au` e `.co.jp`.
 
-## Privacy
+## Provider societari
 
-CheckAziende non richiede accesso permanente a tutti i siti.
+L'architettura corrente assegna un ruolo distinto a ogni fonte:
 
-La pagina corrente viene analizzata localmente solo quando l'utente apre l'estensione tramite `activeTab` e `scripting`. Le pagine Privacy/Contatti/Legal vengono controllate soltanto sullo stesso origin. Per la verifica VIES viene trasmessa soltanto la Partita IVA.
+- **CompanyReports.it** — provider canonico per anagrafica e dati economici quando la P.IVA è nota;
+- **RegistroAziende.it** — fallback e verifica, utile anche per completare campi mancanti e storico bilanci;
+- **Xray Finance** — arricchimento finanziario, in particolare EBITDA ed EBITDA margin;
+- **Aziende.it** — confronto di settore opzionale tramite mediana di fatturato, sempre verificato sulla stessa P.IVA;
+- **VIES** — verifica della Partita IVA.
+
+Ogni provider viene accettato solo quando i dati recuperati sono coerenti con la P.IVA richiesta. Le fonti terze restano isolate in moduli separati, così possono essere corrette o sostituite senza modificare il motore di identificazione.
+
+## Orchestrazione e cache
+
+`src/providers/orchestrator.js` privilegia il primo render rapido e applica gli arricchimenti in modo progressivo.
+
+- CompanyReports e Xray possono essere interrogati in parallelo;
+- RegistroAziende completa o verifica i dati senza bloccare inutilmente il primo render;
+- Aziende.it è un arricchimento opzionale e non modifica l'identità canonica della società;
+- gli aggiornamenti tardivi vengono fusi nello stato già visibile senza rimuovere dati validi forniti da altri provider;
+- gli snapshot aggregati sono salvati in `storage.local` dal background;
+- i dati completi possono essere riutilizzati dalla cache e aggiornati in background secondo la logica stale-while-revalidate.
+
+La cache aggregata usa attualmente il namespace:
+
+```text
+provider-orchestrator:v9:<P.IVA>
+```
+
+## Profilo finanziario
+
+Quando i dati disponibili sono sufficienti, il popup può mostrare un profilo finanziario sintetico basato su indicatori interni come:
+
+- numero di bilanci depositati;
+- EBITDA margin;
+- margine netto;
+- trend del fatturato;
+- continuità degli utili;
+- costo del personale e relativa incidenza sul fatturato quando disponibili.
+
+La UI espone una fascia qualitativa conservativa e non presenta questo indicatore come rating creditizio. Con copertura insufficiente dei dati il risultato resta **Dati limitati**.
+
+## Confronto di settore con Aziende.it
+
+Aziende.it è separato dal provider canonico CompanyReports.it.
+
+Dopo il primo render può aggiungere un confronto tra il fatturato dell'azienda e la mediana del relativo settore/provincia. La pagina viene accettata soltanto se la P.IVA coincide esattamente con quella della scheda corrente.
+
+Se il dato non è disponibile, il sito limita le richieste oppure il permesso manca, la sezione resta nascosta senza influenzare anagrafica e dati finanziari principali.
+
+Su Firefox l'accesso a `https://www.aziende.it/*` è gestito come permesso host opzionale nel pacchetto generato. La richiesta parte soltanto da un'azione esplicita dell'utente nella sezione **Confronto di settore**. Chrome, Edge e Opera mantengono invece il relativo host permission nel pacchetto Chromium.
+
+## Privacy e permessi
+
+CheckAziende non richiede accesso permanente a tutti i siti visitati.
+
+La pagina corrente viene analizzata localmente quando l'utente apre l'estensione tramite `activeTab` e `scripting`. Le eventuali pagine Privacy/Contatti/Legal vengono controllate soltanto sullo stesso origin.
+
+Le richieste cross-origin sono limitate ai provider configurati nel manifest e a VIES.
 
 ## Installazione temporanea su Firefox
 
 1. Clona o scarica il repository.
-2. Esegui `npm run build:stores` per generare il pacchetto Firefox in `dist/firefox`.
-3. Apri `about:debugging#/runtime/this-firefox`.
-4. Clicca **Carica componente aggiuntivo temporaneo**.
-5. Seleziona `dist/firefox/manifest.json`.
-6. Apri un sito e clicca CheckAziende.
+2. Installa le dipendenze se necessario.
+3. Esegui:
 
-Il `manifest.json` nella radice è il manifest MV3 per Chromium: usa un `background.service_worker`, che Firefox non supporta. Per questo l'installazione temporanea su Firefox richiede il manifest generato dal build, che usa `background.scripts` con `type: module`.
+```bash
+npm run build:stores
+```
 
-Dopo una modifica esegui di nuovo `npm run build:stores` e usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
+4. Apri `about:debugging#/runtime/this-firefox`.
+5. Clicca **Carica componente aggiuntivo temporaneo**.
+6. Seleziona `dist/firefox/manifest.json`.
+
+Il `manifest.json` nella radice è orientato ai browser Chromium e usa `background.service_worker`. Il build genera il manifest Firefox compatibile con `background.scripts` e applica le differenze di permessi richieste dai diversi store.
+
+Dopo una modifica, rigenera il build e usa **Ricarica** nella scheda dell'estensione in `about:debugging`.
+
+## Build e validazione store
+
+Generazione dei pacchetti:
+
+```bash
+npm run build:stores
+```
+
+Validazione dei manifest e dei pacchetti:
+
+```bash
+npm run validate:stores
+```
+
+Il workflow di release produce pacchetti separati per:
+
+- Firefox;
+- Chrome;
+- Edge;
+- Opera.
+
+Le release GitHub vengono generate a partire dai tag `v*`.
 
 ## Test
+
+Esegui la suite completa con:
 
 ```bash
 npm test
 ```
 
-I test coprono anche:
+È disponibile anche il controllo sintattico dei moduli principali:
 
-- `frontend.computergross.it` → `computergross.it`;
-- dominio `.co.uk`;
+```bash
+npm run syntax
+```
+
+I test includono casi reali ricostruiti e regressioni su:
+
+- gestione di sottodomini e dominio registrabile;
 - normalizzazione delle forme societarie;
-- match P.IVA forte;
-- match dominio/nome che deve restare **Possibile corrispondenza**;
-- mapping dominio-società confermato che può diventare **Identificata**;
-- fixture HTML ridotte e ricostruite dei casi reali Future Tech, Rubino, MPS Monitor, Xray e Creditsafe;
-- regressioni cross-provider, ad esempio Rubino che deve mantenere l'arricchimento Xray e Future Tech che deve promuovere il bilancio più recente di RegistroAziende;
-- sicurezza sulle directory: una società descritta in una pagina Xray non deve diventare automaticamente il proprietario del dominio.
+- confidence e identificazione conservativa;
+- directory e pagine che descrivono società terze;
+- fallback Privacy/Legal;
+- merge progressivo dei provider;
+- storico bilanci e promozione dell'esercizio più recente;
+- Xray e transient HTTP;
+- Aziende.it e gestione dei permessi Firefox;
+- reset dei dati quando cambia la società visualizzata.
 
-Le fixture sono in `tests/fixtures/` e contengono solo la struttura e i campi necessari ai test, non copie integrali delle pagine pubbliche.
+Le fixture sono in `tests/fixtures/` e contengono soltanto la struttura e i campi necessari ai test.
 
-## Struttura
+## Struttura principale
 
 ```text
 manifest.json
@@ -95,7 +199,12 @@ src/
   confidence.js
   company.js
   domain.js
+  financial-evaluation.js
   scanner.js
+  permissions.js
+  background/
+    provider-snapshot.js
+    service-worker.js
   providers/
     vies.js
     companyreports.js
@@ -103,365 +212,36 @@ src/
     xray.js
     registroaziende.js
     orchestrator.js
+    snapshot-client.js
   popup/
     popup.html
     popup.css
     popup.js
+    data-completion.js
+scripts/
+  build-stores.mjs
+  validate-store-builds.mjs
 tests/
-  domain-confidence.test.mjs
+  fixtures/
 ```
 
-## Provider societari
+## Branching
 
-L’architettura corrente usa quattro fonti con ruoli separati:
+La policy consigliata per il repository è semplice:
 
-- **CompanyReports.it** è il provider canonico per anagrafica e dati economici pubblici quando la P.IVA è nota;
-- **RegistroAziende.it** è il fallback/verificatore e può completare campi mancanti e storico dei bilanci;
-- **Xray Finance** è un provider di arricchimento finanziario, in particolare per EBITDA ed EBITDA margin;
-- **Aziende.it** aggiunge soltanto una mediana di fatturato settoriale verificata sulla P.IVA.
+- `main` contiene solo codice stabile;
+- feature e fix vengono sviluppati su branch temporanei;
+- dopo il merge i branch temporanei possono essere eliminati;
+- `beta/manual-company-search` resta separato perché contiene una funzione volutamente esclusa dalla release stabile.
 
-Il provider CompanyReports usa direttamente la P.IVA nella URL pubblica e accetta la scheda solo se la P.IVA estratta coincide con quella richiesta. Normalizza i campi pubblici disponibili mantenendo invariata l'interfaccia usata dall'orchestratore.
+## Roadmap
 
-`src/providers/companyreports.js` resta il provider primario; `src/providers/aziende.js` contiene solo il confronto di settore.
-
-L’accesso cross-origin è limitato a VIES e ai quattro provider configurati nel `manifest.json`.
-
-## Prossimi passi
+Possibili evoluzioni:
 
 - feedback **È questa / Non è questa** con backend e protezione da abuso;
-- Public Suffix List completa per i domini internazionali;
-- fixture HTML reali per i provider;
-- separazione ulteriore tra controller e renderer del popup;
-- possibile resolver dedicato dominio → proprietario del sito, mantenuto separato e disattivabile;
-- packaging e release Firefox/Chromium.
-
-Le integrazioni con fonti terze devono restare isolate in moduli provider, così una fonte può essere sostituita senza modificare il motore di identificazione.
-
-
-## EBITDA e valutazione finanziaria
-
-La versione 0.5.0 aggiunge un secondo provider opzionale basato sulle schede pubbliche di Xray Finance.
-
-Quando la P.IVA è già stata identificata:
-- CheckAziende cerca la società su Xray Finance;
-- accetta la scheda soltanto se la P.IVA coincide;
-- importa EBITDA ed EBITDA margin;
-- mantiene il provider canonico come fonte primaria per anagrafica, fatturato e utile; RegistroAziende completa lo storico dei bilanci quando disponibile;
-- se Xray Finance non trova una corrispondenza valida, la scheda continua a funzionare senza EBITDA.
-
-È presente anche un motore interno di valutazione finanziaria che considera stato, anzianità, numero di bilanci disponibili, EBITDA margin, margine netto, trend del fatturato e continuità degli utili. Il punteggio non viene ancora mostrato nell'interfaccia: servirà per una futura scala rosso-verde e per il requisito operativo di almeno due bilanci depositati.
-
-L'utile è mostrato in verde quando positivo e in rosso con segno meno quando negativo. Il badge con il numero di bilanci è stato rimosso; restano soltanto stato dell'impresa e anzianità.
-
-
-## Provider orchestrator
-
-La versione 0.6.0 introduce un orchestratore dei provider con priorità alla velocità:
-
-- VIES continua a verificare la P.IVA;
-- CompanyReports.it e Xray Finance vengono interrogati in parallelo con un budget breve;
-- RegistroAziende.it viene usato come fallback bloccante solo se il provider primario è incompleto;
-- quando i dati principali sono già disponibili, RegistroAziende.it viene usato in background come verifica incrociata e non ritarda il primo render;
-- i risultati tardivi di CompanyReports.it, RegistroAziende.it, Xray Finance e Aziende.it aggiornano la scheda già aperta non appena ciascuna fonte termina, senza attendere le altre; CompanyReports.it conserva la priorità canonica e ogni aggiornamento valido viene fuso nello snapshot;
-- i risultati completi vengono memorizzati localmente per 24 ore e possono essere riutilizzati fino a 7 giorni con aggiornamento in background (stale-while-revalidate);
-- eventuali conflitti su stato, fatturato o utile vengono registrati nella struttura di verifica per il futuro score di affidabilità dei dati.
-
-RegistroAziende.it viene sempre validato sulla stessa P.IVA prima di essere accettato.
-
-La cache aggregata `provider-orchestrator:v9:<P.IVA>` è gestita dal background MV3 tramite messaggi runtime: `src/background/provider-snapshot.js` legge e fonde gli snapshot in `storage.local`, serializzando le scritture per P.IVA. `src/providers/snapshot-client.js` è il confine usato dall’orchestratore; errori del background equivalgono a una cache non disponibile. Ricerche e parsing dei provider, Promise di arricchimento, stale-while-revalidate e rendering rimangono nel popup. Il build usa uno script background Firefox e un service worker modulo nei browser Chromium.
-
-Il resolver restituisce il primo risultato insieme a `pendingUpdates` (`provider`, `promise`): ogni risultato tardivo valido viene sia scritto nello snapshot sia applicato alla scheda aperta. La stessa regola vale per i provider mancanti in uno snapshot ancora fresco e per gli aggiornamenti annidati di uno snapshot stale. Il popup conta le operazioni fino all’applicazione del relativo aggiornamento, non soltanto fino alla risposta HTTP. Xray condivide le richieste in corso allo stesso URL e non ripete la ricerca sul nome canonico se non introduce nuovi slug: una risposta transitoria HTTP 503 non viene memorizzata come assenza definitiva.
-
-ReportAziende resta una possibile fonte futura tramite API autenticata. CompanyReports.it è invece ora integrato nel fast path tramite la scheda pubblica per P.IVA.
-
-
-## Hardening 0.7.0
-
-La versione 0.7.0 introduce un passaggio di hardening qualitativo senza modificare la UX:
-
-- la cache negativa di Aziende.it distingue correttamente un miss memorizzato da una cache assente;
-- il lookup Aziende.it per P.IVA termina appena trova un match valido, senza scandire inutilmente tutti gli slug candidati;
-- VAT/P.IVA presenti nei metadati di pagine directory vengono trattati come evidenza debole se non coerenti con dominio/brand;
-- gli anni finanziari mantengono la provenienza (`source`, `sources`) e l'indicazione `isFiled`;
-- Xray Finance può arricchire i dati economici ma non viene considerato, da solo, prova di bilancio depositato;
-- il requisito interno "almeno due bilanci depositati" conta soltanto esercizi marcati come depositati dalle fonti societarie;
-- i risultati di RegistroAziende ottenuti da parser DOM e parser testuale vengono fusi per anno anziché sostituiti;
-- uno snapshot provider ancora fresco non viene aggiornato ad ogni apertura: il refresh di rete parte solo quando la cache è stale;
-- la CI esegue anche un controllo sintattico esplicito sui moduli dell'estensione.
-
-Queste regole preparano il futuro score rosso-verde evitando di confondere dati economici osservati con bilanci effettivamente depositati.
-
-
-## Refactor 0.7.1
-
-La normalizzazione della società e l'arricchimento fra provider canonico, RegistroAziende e Xray sono gestiti in `src/company.js`. Il popup resta responsabile del flusso e del rendering, mentre il modello dati è ora isolato e testabile separatamente. Questo riduce il rischio di regressioni quando verranno aggiunti nuovi provider o lo score finanziario visibile.
-
-
-## UI 0.7.3
-
-Quando una scheda azienda è già visibile ma uno o più provider stanno ancora completando i dati, compare in alto una piccola riga `Completamento dati in corso…`. L’indicatore appare solo se il caricamento in background dura più di circa 350 ms dopo il primo render e scompare quando tutte le richieste pertinenti terminano, anche in caso di errore. Una ricerca successiva non può applicare i risultati della precedente.
-
-
-## Fix Xray 0.7.4
-
-Il provider Xray non memorizza più per 24 ore errori HTTP temporanei come risultati negativi. La cache Xray è stata invalidata e il caso reale `rubino-s-r-l-15` è coperto da test di regressione. Inoltre, quando una pagina profilo descrive una società terza, il titolo della pagina non viene usato per identificare il proprietario del sito nel fallback per dominio.
-
-
-## Site-owner fallback 0.7.5
-
-Le pagine Privacy/Legal possono ora fornire anche la ragione sociale del titolare del sito, non solo P.IVA e contatti. Questo copre portali come Xray Finance, la cui Privacy identifica `Xray Finance Srl` ma non ripete la P.IVA. Inoltre il testo di un link same-origin alla home viene considerato un segnale di brand del sito, utile quando il logo è testuale. La logica dei provider e dei dati finanziari resta invariata.
-
-
-## Cache fix 0.7.6
-
-Dopo il fix Xray 0.7.4 viene invalidato anche lo snapshot generale dell'orchestratore. Questo evita che una società già memorizzata senza Xray continui a riutilizzare per 24 ore un risultato incompleto senza eseguire la nuova ricerca Xray.
-
-
-## Xray search-first 0.7.7
-
-Il lookup Xray prova ora prima la ricerca pubblica per P.IVA quando la homepage espone un form utilizzabile, e usa l'enumerazione degli slug numerici solo come fallback. Le richieste speculative sono state ridotte a piccoli batch per evitare throttling prima di raggiungere profili disambiguati come `rubino-s-r-l-15`. Il retry con la ragione sociale canonica viene inoltre mantenuto in background e riutilizzato dal popup. Sono state invalidate sia la cache Xray sia la cache dell'orchestratore.
-
-
-## Domain fallback 0.7.8
-
-Quando l'estensione è aperta su un sottodominio applicativo e non trova una P.IVA locale, il fallback per dominio può ora cercare anche la variante italiana del brand nelle fonti pubbliche (es. `creditsafe.com` -> `Creditsafe Italia Srl`). Questa espansione viene usata solo nel lookup per dominio, quindi non aumenta il costo dei normali lookup per P.IVA. Non sono stati aggiunti permessi host globali.
-
-
-## Privacy owner fallback 0.7.9
-
-Il fallback Privacy/Legal estrae ora la ragione sociale del titolare usando prima la struttura HTML (intestazione `Titolare del Trattamento dei Dati` + contenuto successivo), con regex testuale come fallback. Questo evita i falsi negativi quando `DOMParser` appiattisce i ritorni a capo, come sulle schede Xray Finance. Inoltre i tentativi automatici di P.IVA non popolano più il campo di ricerca manuale, che viene svuotato nello stato `Non identificata`.
-
-
-## Provider recovery 0.7.10
-
-Gli snapshot freschi ma incompleti non congelano più per 24 ore i provider mancanti: se Xray Finance non era pronto al primo caricamento, viene ritentato in background alle aperture successive mantenendo il render immediato dalla cache. Il fallback per dominio usa ora anche RegistroAziende come sorgente di discovery, utile quando Privacy/Legal identifica il titolare per nome ma Aziende.it non espone la società. Le pagine Privacy/Legal possono inoltre fornire un hint di città dal blocco del titolare, ad esempio `Xray Finance Srl - ... Bolzano`, così RegistroAziende può risolvere lo slug corretto.
-
-
-## Possibile resolver dominio → proprietario
-
-Per ora il progetto mantiene il metodo attuale di identificazione. È stata però annotata come possibile evoluzione futura l'introduzione di un resolver dedicato al proprietario del dominio, separato dalla società descritta nella pagina.
-
-L'obiettivo sarebbe distinguere in modo esplicito tre concetti:
-- proprietario del sito/dominio;
-- società descritta nella pagina corrente;
-- società cercata manualmente dall'utente.
-
-Un caso tipico è una directory o un portale dati: una pagina può descrivere una società terza, mentre il dominio appartiene a un'altra società. Il resolver lavorerebbe quindi sul dominio registrabile e sui segnali del sito, non sul contenuto aziendale della singola scheda.
-
-Architettura ipotizzata:
-- nuovo modulo isolato, ad esempio `src/site-owner-resolver.js`;
-- feature flag per poterlo disattivare immediatamente in caso di regressioni;
-- metodo attuale lasciato invariato come fallback;
-- cache separata, ad esempio `site-owner:v1:xrayfinance.it`, senza interferire con le cache dei provider;
-- stati conservativi `identified`, `possible`, `unknown`;
-- solo gli owner risolti con evidenza forte verrebbero riutilizzati automaticamente alle aperture successive.
-
-Ordine di evidenza previsto:
-1. P.IVA esplicita in footer/area legale della pagina corrente;
-2. P.IVA trovata in Privacy / Note legali / Contatti;
-3. ragione sociale del titolare ricavata da Privacy/Legal;
-4. risoluzione della ragione sociale tramite i provider societari disponibili, con CompanyReports quando la P.IVA è nota e RegistroAziende come fallback;
-5. dominio, logo, `og:site_name`, copyright e brand come segnali di coerenza;
-6. Xray Finance usato come verifica/arricchimento finanziario, non come fonte primaria per stabilire il proprietario del dominio.
-
-Il resolver non dovrebbe dipendere da un singolo provider: RegistroAziende può restare utile per il discovery nome → società/P.IVA, CompanyReports per il dettaglio una volta nota la P.IVA, mentre Xray resta soprattutto un provider finanziario.
-
-La scelta attuale è di non implementarlo ancora: i casi esistenti vengono gestiti con il flusso corrente e il resolver resta una possibile evoluzione architetturale generale, da introdurre solo se i casi directory/portali diventano abbastanza frequenti da giustificarlo.
-
-
-## Profilo finanziario 0.8.0
-
-La valutazione finanziaria interna viene ora mostrata nel popup in un accordion compatto **prima dei contatti**, così non appesantisce la scheda principale.
-
-L'interfaccia non espone il punteggio numerico interno. Mostra invece una fascia qualitativa conservativa:
-
-- **Solido**
-- **Buono**
-- **Intermedio**
-- **Fragile**
-- **Debole**
-- **Dati limitati**
-
-Per evitare giudizi troppo forti con informazioni incomplete, una società resta in **Dati limitati** se la copertura dei segnali è inferiore al 50% oppure se non risultano almeno due bilanci depositati.
-
-Nell'accordion vengono mostrati, quando disponibili, bilanci depositati, EBITDA margin, margine netto, trend del fatturato, continuità degli utili e copertura dei dati. La UI specifica che si tratta di un indicatore interno basato sui dati disponibili e non di un rating creditizio.
-
-Le fixture realistiche di Future Tech e Rubino verificano anche che il profilo resti utilizzabile dopo il merge dei provider.
-
-
-## Aziende.it reliability 0.8.1
-
-Il lookup Aziende.it è stato reso più conservativo dopo alcuni casi in cui il provider spariva temporaneamente dalla scheda pur essendo disponibile sul sito pubblico.
-
-- i lookup per P.IVA provano ora gli slug in sequenza, dando priorità al candidato esatto, invece di aprire piccoli batch concorrenti;
-- gli errori temporanei come `429` e `5xx` non vengono più memorizzati come risultati negativi;
-- sui transienti viene eseguito un solo retry leggero;
-- la cache negativa resta solo per i veri `404`;
-- la cache provider Aziende.it è stata invalidata (`v6`);
-- i nomi VIES rumorosi o con forme societarie ripetute, ad esempio `MPS MONITOR SRL A SOCIO UNICO !!S.R.L.`, generano anche la variante canonica `mps-monitor-srl`;
-- un test protegge l'ordine del caso normale `FUTURE TECH SRL` → `future-tech-srl`.
-
-La P.IVA resta sempre il controllo finale: una pagina Aziende.it viene accettata solo se il VAT trovato coincide con quello richiesto.
-
-
-## Provider async merge 0.8.2
-
-Gli aggiornamenti in background dei provider vengono ora fusi nello stato già visibile invece di partire ogni volta dallo snapshot iniziale.
-
-Questo evita una regressione in cui Aziende.it poteva risolversi correttamente in background e comparire per un istante, ma un successivo aggiornamento Xray/Registro poteva ridisegnare la scheda usando uno stato precedente e rimuoverlo dalle fonti mostrate.
-
-Regole:
-- una fonte già risolta non viene rimossa da un aggiornamento asincrono successivo che non la contiene;
-- Aziende.it resta il provider canonico una volta risolto;
-- RegistroAziende e Xray continuano ad arricchire senza sostituire la fonte canonica;
-- la cache generale dell'orchestratore è stata invalidata a `v8` per non riutilizzare snapshot precedenti incompleti.
-
-Sono presenti test di regressione sulla sequenza Registro → Aziende → Xray e sul mantenimento di Aziende come primary.
-
-
-## Consolidamento 0.8.3
-
-La versione 0.8.3 consolida il passaggio del provider canonico da Aziende.it a CompanyReports.it senza modificare le logiche di identificazione, confidence, merge o rendering.
-
-- documentata l'architettura corrente dei provider;
-- allineati versione di manifest e package;
-- aggiunte fixture CompanyReports ricostruite per i casi Future Tech e Rubino;
-- i test di regressione usano ora fixture coerenti con il provider canonico corrente;
-- le fixture legacy Aziende.it non fanno più parte della suite attiva.
-
-Il flusso resta: **CompanyReports.it → canonico**, **RegistroAziende.it → fallback/verifica**, **Xray Finance → arricchimento**.
-
-
-## Dati CompanyReports in UI 0.8.4
-
-La versione 0.8.4 espone alcuni dati già disponibili dal provider CompanyReports senza appesantire la scheda principale.
-
-- il **costo del personale** viene mostrato nell'accordion del profilo finanziario, con l'anno quando disponibile;
-- viene calcolata automaticamente l'**incidenza costo personale / fatturato**, usando il fatturato dello stesso esercizio del costo del personale;
-- il **Codice fiscale** compare nei dati societari solo quando è diverso dalla Partita IVA;
-- il campo precedentemente etichettato **Iscrizione** viene mostrato come **Costituzione**, coerentemente con il dato `Fondazione` fornito da CompanyReports.
-
-Il rapporto costo personale / fatturato conserva il riferimento allo stesso esercizio anche quando RegistroAziende promuove un fatturato più recente come dato principale.
-
-
-## Directory owner detection 0.8.5
-
-Corretto un caso reale in cui una homepage directory poteva contenere dati strutturati relativi alle aziende elencate e, contemporaneamente, la P.IVA del proprietario del sito nel footer.
-
-Sulle pagine riconosciute come directory/ricerca:
-- i VAT presenti in JSON-LD o metadati della pagina non vengono più usati come candidati proprietario del sito;
-- una P.IVA trovata in un vero footer/area legale mantiene priorità;
-- se il footer non è semanticamente marcato, il fallback sulla coda testuale della pagina resta attivo;
-- quando la coda contiene più P.IVA, viene privilegiata l'ultima occorrenza con forte contesto legale, tipicamente quella del footer.
-
-È presente un test di regressione sul caso `aziende.it`, dove il proprietario del sito è Ad Intend Srl (P.IVA 02357550066) ma la pagina contiene anche dati di società terze.
-
-
-## Ricerca manuale per ragione sociale 0.9.0
-
-La ricerca manuale accetta ora sia **Partita IVA** sia **ragione sociale**.
-
-- se il valore inserito è numerico, continua a essere usato il normale flusso di lookup per P.IVA;
-- se viene inserito un nome di almeno 4 caratteri, CheckAziende usa la ricerca pubblica di RegistroAziende.it e mostra fino a 5 corrispondenze;
-- ogni risultato mostra ragione sociale, località e P.IVA;
-- selezionando un risultato, la P.IVA viene passata al normale orchestratore: CompanyReports.it resta il provider canonico, RegistroAziende.it il fallback/verificatore e Xray Finance l'arricchimento;
-- il nome e la località selezionati vengono riutilizzati come hint per rendere più affidabile il lookup dei provider;
-- i risultati della ricerca per nome vengono memorizzati localmente per 30 minuti;
-- non vengono effettuate richieste mentre l'utente digita: la ricerca parte soltanto con il pulsante **Cerca** o con Invio.
-
-La ricerca pubblica di RegistroAziende richiede almeno 4 caratteri; l'interfaccia applica lo stesso limite.
-
-
-## Manual search parser fix 0.9.1
-
-Corretto il parser della ricerca manuale per ragione sociale.
-
-RegistroAziende.it espone correttamente la ricerca pubblica tramite `/ricerca?q=...`, ma i risultati non sono garantiti in una tabella HTML semantica. La 0.9.0 cercava esclusivamente righe `<tr>`, quindi in alcune risposte reali poteva mostrare erroneamente **Nessuna azienda trovata** anche quando la società era presente.
-
-La 0.9.1:
-- mantiene il parser tabellare;
-- aggiunge un fallback basato sui link alle schede `/azienda/...`;
-- risale al contenitore del singolo risultato e ne estrae P.IVA e località;
-- invalida la cache delle ricerche manuali precedenti, così eventuali risultati vuoti della 0.9.0 non restano memorizzati.
-
-
-## Manual search relevance 0.9.2
-
-La ricerca manuale per ragione sociale filtra e ordina ora i risultati in base alla somiglianza con il testo inserito.
-
-Il fallback HTML introdotto in 0.9.1 poteva raccogliere anche link aziendali non pertinenti presenti nella stessa pagina. In casi reali, cercando `future tech srl`, potevano quindi comparire società completamente scollegate.
-
-La 0.9.2:
-- estrae più candidati dalla pagina di ricerca prima di limitarli;
-- normalizza ragione sociale e forma giuridica;
-- calcola la copertura dei termini cercati;
-- mette in cima le corrispondenze esatte o quasi esatte;
-- scarta le aziende senza sufficiente sovrapposizione con la query;
-- limita a 5 solo dopo il ranking;
-- invalida nuovamente la cache della ricerca manuale.
-
-
-## Manual search accuracy 0.9.3
-
-La ricerca manuale per ragione sociale viene resa più rigorosa e i risultati vengono verificati sulla pagina pubblica della singola azienda prima di essere mostrati.
-
-- i risultati di ricerca possono essere scoperti anche quando la lista non espone direttamente la P.IVA;
-- ogni candidato rilevante viene aperto sulla relativa pagina `/azienda/...` e la P.IVA viene ricavata dalla scheda aziendale, evitando associazioni con aziende vicine o suggerite nella stessa pagina;
-- per query con più parole devono corrispondere tutti i termini significativi: ad esempio `Scstechnology Srl` non è più considerata una corrispondenza per `future tech srl`;
-- la lunghezza minima della ricerca scende da 4 a 3 caratteri, quindi nomi brevi come `EPY` sono supportati;
-- la cache della ricerca manuale viene invalidata (`v4`).
-
-Corretto inoltre il cambio azienda durante una ricerca manuale: se la nuova società non dispone di fatturato, il popup non conserva più il valore visualizzato per la società precedente. Il blocco fatturato viene nascosto e azzerato quando il dato non è disponibile. Durante una ricerca manuale vengono anche nascosti i contatti letti dal sito aperto, perché potrebbero appartenere a un'azienda diversa da quella cercata.
-
-
-## Short-name search e indirizzi completi 0.9.4
-
-La ricerca manuale gestisce meglio sia le ragioni sociali corte sia i nomi privi di forma giuridica. Se l'utente inserisce un nome senza suffisso societario, il provider prova anche varianti comuni (`SRL`, `SRLS`, `SPA`, `SNC`, `SAS`) mantenendo il ranking sulla query originale. Questo copre casi come `EPY`, `Rubino` e `Omnitekstore`. Il matching ignora inoltre token troppo corti, evitando falsi positivi come la congiunzione `E` che in precedenza poteva far passare un risultato non pertinente. La cache della ricerca manuale viene invalidata (`v6`).
-
-Le verifiche dei risultati vengono effettuate in piccoli batch e i fallimenti HTTP transitori non vengono più memorizzati come miss per 24 ore, evitando che un rate limit temporaneo renda una società apparentemente introvabile.
-
-La visualizzazione della sede completa inoltre gli indirizzi parziali del provider canonico usando città e provincia già ottenute dalle fonti di fallback. Un indirizzo come `Via Margherita Viganò De Vizzi, 93/95 -` può quindi essere completato con `Cinisello Balsamo (MI)` quando questi dati sono disponibili da RegistroAziende/REA, senza duplicare località già presenti.
-
-
-## Manual search hardening 0.9.5
-
-La 0.9.5 consolida le correzioni della ricerca manuale per ragione sociale:
-- i nomi senza forma giuridica vengono ritentati con suffissi societari comuni;
-- il matching dei token non considera più prefissi troppo corti, evitando falsi positivi come `E` → `EPY`;
-- le verifiche dei candidati su RegistroAziende vengono effettuate in batch più piccoli;
-- errori HTTP transitori non vengono memorizzati come miss di lunga durata;
-- cache delle ricerche e delle schede RegistroAziende invalidate.
-
-
-## Release stabile 1.0.0
-
-La release stabile 1.0.0 mantiene la ricerca manuale esclusivamente per **Partita IVA**. La ricerca per ragione sociale sviluppata nelle versioni 0.9.x è stata spostata sul branch `beta/manual-company-search` perché il comportamento della ricerca pubblica per nome non è ancora sufficientemente stabile per la release principale.
-
-La versione stabile include invece tutte le correzioni consolidate su:
-- identificazione automatica dal sito e dalle pagine legali;
-- CompanyReports.it come provider canonico;
-- RegistroAziende.it come verifica/fallback;
-- Xray Finance come arricchimento;
-- storico bilanci, EBITDA e profilo finanziario;
-- costo del personale e relativa incidenza;
-- completamento degli indirizzi parziali;
-- reset corretto dei dati finanziari quando si cambia azienda manualmente.
-
-Lo sviluppo della ricerca per ragione sociale continua separatamente nel branch beta e potrà rientrare nella release stabile solo dopo test sufficienti sui casi reali.
-
-## Confronto di settore (Task 2)
-
-Aziende.it è una fonte distinta dal provider canonico CompanyReports.it. Dopo il primo render, una ricerca pubblica per P.IVA può aggiungere il fatturato dell’azienda e la mediana del settore provinciale: il profilo Aziende.it viene accettato solo se la P.IVA coincide esattamente. Quando i dati mancano o il sito limita le richieste, la sezione resta nascosta e l’identità e i dati finanziari principali non cambiano. La differenza percentuale è mostrata solo se il fatturato e la mediana sono confrontabili nello stesso contesto temporale.
-
-La ricerca Aziende.it è opzionale e non ritarda la scheda. Le risposte valide e gli esiti negativi sono memorizzati localmente con durate diverse; `429` e pagine di challenge attivano un breve cooldown senza retry aggressivi. La cache aggregata mantiene la chiave `provider-orchestrator:v9:<P.IVA>` e i TTL di 24 ore / 7 giorni: uno schema esplicito separa `companyReports` (canonico) da `aziende` (confronto). Gli snapshot legacy senza marker vengono interpretati come CompanyReports senza riscriverne il timestamp al primo accesso.
-
-Su Firefox l’accesso a `https://www.aziende.it/*` è un permesso host opzionale nel pacchetto generato. Se manca, la scheda continua a mostrare i dati principali e propone **Abilita** nella sezione **Confronto di settore**, senza interrogare Aziende.it. La richiesta di accesso parte soltanto dal click: dopo il consenso il confronto viene caricato per la P.IVA visibile nella stessa apertura, con il normale indicatore di completamento. Un rifiuto lascia disponibile il pulsante; la revoca nasconde il confronto senza cancellare le cache né bloccare gli altri provider.
-
-Solo su Firefox, quando manca il permesso, sotto **Abilita** compare una nota discreta: «Firefox potrebbe mostrare la richiesta di autorizzazione dietro questo popup. In tal caso clicca fuori e scegli “Consenti”.» La nota scompare dopo il consenso e non viene mostrata su Chrome, Edge o Opera.
-Il consenso ricevuto durante un cambio P.IVA viene applicato anche alla nuova scheda quando compare. La revoca nasconde confronto e attribuzione Aziende.it anche se una ricerca successiva non valida lascia visibile la scheda precedente, incluse le schede scoperte da dominio; risposte `permissions.contains()` obsolete non possono sovrascrivere un consenso o una revoca più recenti. Le richieste della scheda sostituita possono ancora completare la cache, ma non mantengono attivo l’indicatore di completamento della nuova azienda.
-
-Un nuovo consenso dopo una revoca ripristina anche il confronto già in cache mentre il lookup precedente è ancora pendente, senza duplicare la richiesta; un successivo esito senza dati non nasconde quel confronto.
-
-I controlli del permesso restano associati alla scheda effettivamente visibile: un candidato automatico rifiutato non la sostituisce, e un controllo asincrono della scheda precedente non può ripristinarne i dati, neppure se la P.IVA è la stessa. Se un aggiornamento progressivo rende identificabile una nuova scheda dopo il consenso, anche quella scheda avvia subito il confronto Aziende.it, inclusi i casi in cui una revoca intermedia aveva bloccato il suo canale iniziale.
-
-Chrome, Edge e Opera mantengono Aziende.it negli `host_permissions` obbligatori. `npm run validate:stores` verifica esplicitamente questa differenza e che tutti gli altri host rimangano invariati.
+- Public Suffix List completa;
+- ulteriore separazione tra controller e renderer del popup;
+- resolver dedicato dominio → proprietario del sito, mantenuto separato e disattivabile;
+- eventuale reintegro della ricerca per ragione sociale quando il discovery sarà sufficientemente affidabile.
+
+L'obiettivo resta privilegiare identificazioni verificabili e ridurre i falsi positivi, anche a costo di mostrare **Non identificata** nei casi ambigui.
